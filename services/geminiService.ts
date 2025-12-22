@@ -33,11 +33,13 @@ Extract the Main Reinforcement (主筋) and Hoop Reinforcement (帯筋) details 
 `;
 
 export const extractDataFromPdf = async (base64Pdf: string): Promise<ColumnReinforcementData[]> => {
-  // Use API key exclusively from process.env.API_KEY as per guidelines.
-  // Assume process.env.API_KEY is pre-configured and valid.
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error("VITE_GEMINI_API_KEY is not set");
+  }
 
-  // Use the user's prompt but override the "Output Format" section by enforcing a JSON schema.
+  const ai = new GoogleGenAI({ apiKey });
   const finalPrompt = `
     ${SYSTEM_PROMPT}
 
