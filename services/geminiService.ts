@@ -33,17 +33,18 @@ Extract the Main Reinforcement (主筋) and Hoop Reinforcement (帯筋) details 
 `;
 
 export const extractDataFromPdf = async (base64Pdf: string): Promise<ColumnReinforcementData[]> => {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  
-  if (!apiKey) {
-    throw new Error("VITE_GEMINI_API_KEY is not set");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
+  // Use API key exclusively from process.env.API_KEY as per guidelines.
+  // Assume process.env.API_KEY is pre-configured and valid.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
   // Use the user's prompt but override the "Output Format" section by enforcing a JSON schema.
   const finalPrompt = `
     ${SYSTEM_PROMPT}
+
+    **Refinement Instructions:**
+    *   When extracting reinforcement values (e.g., "24-D25 (SD345)"), **REMOVE** the material information in parentheses.
+    *   Example: "24-D25 (SD345)" should become "24-D25".
+    *   Example: "D13@100 (SD295)" should become "D13@100".
 
     **IMPORTANT OVERRIDE:**
     Ignore the "Output Format" instruction in the text above regarding Markdown. 
@@ -79,11 +80,11 @@ export const extractDataFromPdf = async (base64Pdf: string): Promise<ColumnReinf
               },
               mainReinforcement: {
                 type: Type.STRING,
-                description: "Extracted value for '主筋' (Main Bar)"
+                description: "Extracted value for '主筋' (Main Bar). Omit material grade like (SD345)."
               },
               hoopReinforcement: {
                 type: Type.STRING,
-                description: "Extracted value for '帯筋' (Hoop Bar)"
+                description: "Extracted value for '帯筋' (Hoop Bar). Omit material grade like (SD295)."
               }
             },
             required: ['columnType', 'mainReinforcement', 'hoopReinforcement']
@@ -97,7 +98,18 @@ export const extractDataFromPdf = async (base64Pdf: string): Promise<ColumnReinf
       throw new Error("No data returned from the model.");
     }
 
-    return JSON.parse(jsonText) as ColumnReinforcementData[];
+    const rawData = JSON.parse(jsonText) as ColumnReinforcementData[];
+
+    // Robust post-processing to clean up any remaining parentheses (half-width or full-width)
+    // Regex: Match a space (optional) followed by ( or （, any content, then ) or ）
+    const cleanValue = (val: string) => val.replace(/\s*[\(（].*?[\)）]/g, '').trim();
+
+    return rawData.map(item => ({
+      ...item,
+      mainReinforcement: cleanValue(item.mainReinforcement),
+      hoopReinforcement: cleanValue(item.hoopReinforcement),
+    }));
+
   } catch (error) {
     console.error("Gemini Extraction Error:", error);
     throw error;
