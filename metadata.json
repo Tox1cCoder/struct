@@ -1,0 +1,5 @@
+{
+  "name": "StructExtract",
+  "description": "A specialized tool for extracting reinforcement details (Main and Hoop bars) from structural engineering PDF documents.",
+  "requestFramePermissions": []
+}
