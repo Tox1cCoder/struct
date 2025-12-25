@@ -35,8 +35,8 @@ const App: React.FC = () => {
     setFileResults(prev => prev.map(r => r.id === id ? { ...r, status: 'PROCESSING' } : r));
 
     try {
-      const base64Pdf = await fileToBase64(file);
-      const data = await extractDataFromPdf(base64Pdf);
+      const base64Data = await fileToBase64(file);
+      const data = await extractDataFromPdf(base64Data, file.type);
       
       setFileResults(prev => prev.map(r => 
         r.id === id ? { ...r, status: 'SUCCESS', data } : r

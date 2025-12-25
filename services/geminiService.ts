@@ -32,7 +32,7 @@ Extract the Main Reinforcement (主筋) and Hoop Reinforcement (帯筋) details 
 *   Ensure all distinct Column Types found in the red boxes are listed in the table.
 `;
 
-export const extractDataFromPdf = async (base64Pdf: string): Promise<ColumnReinforcementData[]> => {
+export const extractDataFromPdf = async (base64Data: string, mimeType: string): Promise<ColumnReinforcementData[]> => {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
   
   if (!apiKey) {
@@ -60,8 +60,8 @@ export const extractDataFromPdf = async (base64Pdf: string): Promise<ColumnReinf
         parts: [
           {
             inlineData: {
-              mimeType: 'application/pdf',
-              data: base64Pdf
+              mimeType: mimeType,
+              data: base64Data
             }
           },
           {

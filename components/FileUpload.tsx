@@ -22,9 +22,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFilesSelect, disabled 
     event.preventDefault();
     if (disabled) return;
     
-    // Fixed: Explicitly type 'file' as File to avoid "Property 'type' does not exist on type 'unknown'"
+    // Accept both PDF and image files
     const droppedFiles = Array.from(event.dataTransfer.files).filter(
-      (file: File) => file.type === 'application/pdf'
+      (file: File) => file.type === 'application/pdf' || file.type.startsWith('image/')
     );
     
     if (droppedFiles.length > 0) {
@@ -48,7 +48,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFilesSelect, disabled 
         type="file"
         ref={fileInputRef}
         onChange={handleFileChange}
-        accept=".pdf"
+        accept=".pdf,image/*"
         multiple
         className="hidden"
         disabled={disabled}
@@ -61,11 +61,11 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFilesSelect, disabled 
           </svg>
         </div>
         <div className="flex flex-col items-center">
-          <h3 className="text-lg font-semibold text-gray-900">Upload Structural PDFs</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Upload Structural Documents</h3>
           <p className="text-sm text-gray-500 mt-1">Click to browse or drag & drop files here</p>
           <div className="mt-2 flex items-center gap-2">
              <span className="inline-flex items-center rounded-md bg-gray-50 px-2 py-1 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-500/10">Multiple files supported</span>
-             <span className="text-xs text-gray-400">PDF only</span>
+             <span className="text-xs text-gray-400">PDF & Images</span>
           </div>
         </div>
       </div>
