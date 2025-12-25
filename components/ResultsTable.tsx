@@ -18,8 +18,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
 
   const handleCopyMarkdown = () => {
     // Generate Markdown Table
-    const header = "| File | Column Type | 主筋 | 帯筋 |\n| :--- | :--- | :--- | :--- |";
-    const rows = data.map(row => `| ${row.sourceFileName || '-'} | ${row.columnType} | ${row.mainReinforcement} | ${row.hoopReinforcement} |`).join("\n");
+    const header = "| File | Column Type | 柱形 | 主筋 | 帯筋 |\n| :--- | :--- | :--- | :--- | :--- |";
+    const rows = data.map(row => `| ${row.sourceFileName || '-'} | ${row.columnType} | ${row.columnDimensions} | ${row.mainReinforcement} | ${row.hoopReinforcement} |`).join("\n");
     const markdown = `${header}\n${rows}`;
 
     navigator.clipboard.writeText(markdown).then(() => {
@@ -64,6 +64,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider">
               <th className="px-6 py-3 font-semibold border-b border-gray-200">File</th>
               <th className="px-6 py-3 font-semibold border-b border-gray-200">Column Type</th>
+              <th className="px-6 py-3 font-semibold border-b border-gray-200">柱形 (Dimensions)</th>
               <th className="px-6 py-3 font-semibold border-b border-gray-200">Main Reinforcement (主筋)</th>
               <th className="px-6 py-3 font-semibold border-b border-gray-200">Hoop Reinforcement (帯筋)</th>
             </tr>
@@ -79,6 +80,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                 </td>
                 <td className="px-6 py-4 text-sm font-bold text-gray-900">
                   {row.columnType}
+                </td>
+                <td className="px-6 py-4 text-sm text-gray-700 font-mono">
+                  {row.columnDimensions}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-700 font-mono">
                   {row.mainReinforcement}

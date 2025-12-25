@@ -1,5 +1,6 @@
 export interface ColumnReinforcementData {
   columnType: string;
+  columnDimensions: string;
   mainReinforcement: string;
   hoopReinforcement: string;
   sourceFileName?: string;
