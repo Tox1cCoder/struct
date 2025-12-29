@@ -64,7 +64,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider">
               <th className="px-6 py-3 font-semibold border-b border-gray-200">File</th>
               <th className="px-6 py-3 font-semibold border-b border-gray-200">Column Type</th>
-              <th className="px-6 py-3 font-semibold border-b border-gray-200">柱形 (Dimensions)</th>
+              <th className="px-6 py-3 font-semibold border-b border-gray-200">Dimensions (柱形)</th>
               <th className="px-6 py-3 font-semibold border-b border-gray-200">Main Reinforcement (主筋)</th>
               <th className="px-6 py-3 font-semibold border-b border-gray-200">Hoop Reinforcement (帯筋)</th>
             </tr>
