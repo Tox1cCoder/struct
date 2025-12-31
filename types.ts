@@ -10,7 +10,8 @@ export interface ColumnReinforcementData {
 export interface ExpandedReinforcementData {
   sourceFileName: string;
   columnType: string;
-  columnDimensions: string;
+  dimensionWidth: string;
+  dimensionHeight: string;
   mainReinforcementCount: string;
   mainReinforcementSize: string;
   hoopReinforcementSize: string;

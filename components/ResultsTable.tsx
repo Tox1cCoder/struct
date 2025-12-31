@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { ColumnReinforcementData } from '../types';
 import { transformForExport } from '../utils/dataTransform';
@@ -9,6 +9,9 @@ interface ResultsTableProps {
 
 export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
   const [exporting, setExporting] = useState(false);
+
+  // Transform data for display (same as Excel format)
+  const expandedData = useMemo(() => transformForExport(data), [data]);
 
   if (data.length === 0) {
     return (
@@ -21,24 +24,23 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
   const handleExportExcel = () => {
     setExporting(true);
     try {
-      // Transform data: split columns and expand rows
-      const expandedData = transformForExport(data);
-
       // Create worksheet data with headers
       const wsData = [
         [
           'File',
           'Column Type (柱符号)',
-          'Dimensions (柱形)',
-          'Main Reinforcement Count (主筋本数)',
-          'Main Reinforcement Size (主筋径)',
-          'Hoop Reinforcement Size (帯筋径)',
-          'Hoop Reinforcement Spacing (帯筋ピッチ)',
+          'Width (幅)',
+          'Height (せい)',
+          'Main Count (主筋本数)',
+          'Main Size (主筋径)',
+          'Hoop Size (帯筋径)',
+          'Hoop Spacing (帯筋ピッチ)',
         ],
         ...expandedData.map(row => [
           row.sourceFileName,
           row.columnType,
-          row.columnDimensions,
+          row.dimensionWidth,
+          row.dimensionHeight,
           row.mainReinforcementCount,
           row.mainReinforcementSize,
           row.hoopReinforcementSize,
@@ -54,11 +56,12 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
       ws['!cols'] = [
         { wch: 25 }, // File
         { wch: 15 }, // Column Type
-        { wch: 15 }, // Dimensions
-        { wch: 20 }, // Main Count
-        { wch: 18 }, // Main Size
-        { wch: 18 }, // Hoop Size
-        { wch: 22 }, // Hoop Spacing
+        { wch: 10 }, // Width
+        { wch: 10 }, // Height
+        { wch: 15 }, // Main Count
+        { wch: 12 }, // Main Size
+        { wch: 12 }, // Hoop Size
+        { wch: 15 }, // Hoop Spacing
       ];
 
       XLSX.utils.book_append_sheet(wb, ws, 'Reinforcement Data');
@@ -77,12 +80,12 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div className="w-full mx-auto bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
       <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center flex-wrap gap-2">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold text-gray-800">Consolidated Reinforcement Schedule</h2>
           <span className="text-xs font-medium px-2.5 py-0.5 rounded bg-indigo-100 text-indigo-800">
-            {data.length} Entries
+            {expandedData.length} Rows
           </span>
         </div>
         <button
@@ -113,33 +116,45 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
         <table className="w-full text-left">
           <thead>
             <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider">
-              <th className="px-6 py-3 font-semibold border-b border-gray-200">File</th>
-              <th className="px-6 py-3 font-semibold border-b border-gray-200">Column Type</th>
-              <th className="px-6 py-3 font-semibold border-b border-gray-200">Dimensions (柱形)</th>
-              <th className="px-6 py-3 font-semibold border-b border-gray-200">Main Reinforcement (主筋)</th>
-              <th className="px-6 py-3 font-semibold border-b border-gray-200">Hoop Reinforcement (帯筋)</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">File</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">Column Type</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">Width (幅)</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">Height (せい)</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">Main Count</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">Main Size</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">Hoop Size</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">Hoop Spacing</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {data.map((row, index) => (
+            {expandedData.map((row, index) => (
               <tr 
                 key={`${row.columnType}-${index}`} 
                 className="hover:bg-gray-50 transition-colors duration-150"
               >
-                <td className="px-6 py-4 text-xs text-gray-500 font-mono">
+                <td className="px-4 py-3 text-xs text-gray-500 font-mono">
                   {row.sourceFileName}
                 </td>
-                <td className="px-6 py-4 text-sm font-bold text-gray-900">
+                <td className="px-4 py-3 text-sm font-bold text-gray-900">
                   {row.columnType}
                 </td>
-                <td className="px-6 py-4 text-sm text-gray-700 font-mono">
-                  {row.columnDimensions}
+                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                  {row.dimensionWidth}
                 </td>
-                <td className="px-6 py-4 text-sm text-gray-700 font-mono">
-                  {row.mainReinforcement}
+                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                  {row.dimensionHeight}
                 </td>
-                <td className="px-6 py-4 text-sm text-gray-700 font-mono">
-                  {row.hoopReinforcement}
+                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                  {row.mainReinforcementCount}
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                  {row.mainReinforcementSize}
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                  {row.hoopReinforcementSize}
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                  {row.hoopReinforcementSpacing}
                 </td>
               </tr>
             ))}
@@ -149,4 +164,3 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     </div>
   );
 };
-

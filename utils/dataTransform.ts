@@ -27,6 +27,20 @@ export function parseHoopReinforcement(value: string): { size: string; spacing: 
 }
 
 /**
+ * Parse dimensions value (e.g., "600x600" or "600×600" → { width: "600", height: "600" })
+ */
+export function parseDimensions(value: string): { width: string; height: string } {
+  // Match patterns like "600x600", "770×770", "1,400×1,400", etc.
+  // Supports both 'x' and '×' (Unicode multiplication sign)
+  const match = value.match(/^([\d,]+)\s*[x×]\s*([\d,]+)$/i);
+  if (match) {
+    return { width: match[1].replace(/,/g, ''), height: match[2].replace(/,/g, '') };
+  }
+  // Fallback: return original value in width only
+  return { width: value, height: '' };
+}
+
+/**
  * Split column types (e.g., "F21C,F23,F24" → ["F21C", "F23", "F24"])
  */
 export function splitColumnTypes(columnType: string): string[] {
@@ -37,6 +51,7 @@ export function splitColumnTypes(columnType: string): string[] {
 /**
  * Transform data for Excel export:
  * - Split column types into separate rows
+ * - Parse dimensions into width and height
  * - Parse main reinforcement into count and size
  * - Parse hoop reinforcement into size and spacing
  */
@@ -45,6 +60,7 @@ export function transformForExport(data: ColumnReinforcementData[]): ExpandedRei
 
   for (const item of data) {
     const columnTypes = splitColumnTypes(item.columnType);
+    const dimensions = parseDimensions(item.columnDimensions);
     const mainReinf = parseMainReinforcement(item.mainReinforcement);
     const hoopReinf = parseHoopReinforcement(item.hoopReinforcement);
 
@@ -53,7 +69,8 @@ export function transformForExport(data: ColumnReinforcementData[]): ExpandedRei
       result.push({
         sourceFileName: item.sourceFileName || '',
         columnType: colType,
-        columnDimensions: item.columnDimensions,
+        dimensionWidth: dimensions.width,
+        dimensionHeight: dimensions.height,
         mainReinforcementCount: mainReinf.count,
         mainReinforcementSize: mainReinf.size,
         hoopReinforcementSize: hoopReinf.size,
@@ -64,3 +81,4 @@ export function transformForExport(data: ColumnReinforcementData[]): ExpandedRei
 
   return result;
 }
+
