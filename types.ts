@@ -6,6 +6,17 @@ export interface ColumnReinforcementData {
   sourceFileName?: string;
 }
 
+// Expanded data type with split columns for Excel export
+export interface ExpandedReinforcementData {
+  sourceFileName: string;
+  columnType: string;
+  columnDimensions: string;
+  mainReinforcementCount: string;
+  mainReinforcementSize: string;
+  hoopReinforcementSize: string;
+  hoopReinforcementSpacing: string;
+}
+
 export type ProcessingStatus = 'IDLE' | 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'ERROR';
 
 export interface FileResult {

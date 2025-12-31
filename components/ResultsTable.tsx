@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
+import * as XLSX from 'xlsx';
 import { ColumnReinforcementData } from '../types';
+import { transformForExport } from '../utils/dataTransform';
 
 interface ResultsTableProps {
   data: ColumnReinforcementData[];
 }
 
 export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
-  const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   if (data.length === 0) {
     return (
@@ -16,16 +18,62 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     );
   }
 
-  const handleCopyMarkdown = () => {
-    // Generate Markdown Table
-    const header = "| File | Column Type | 柱形 | 主筋 | 帯筋 |\n| :--- | :--- | :--- | :--- | :--- |";
-    const rows = data.map(row => `| ${row.sourceFileName || '-'} | ${row.columnType} | ${row.columnDimensions} | ${row.mainReinforcement} | ${row.hoopReinforcement} |`).join("\n");
-    const markdown = `${header}\n${rows}`;
+  const handleExportExcel = () => {
+    setExporting(true);
+    try {
+      // Transform data: split columns and expand rows
+      const expandedData = transformForExport(data);
 
-    navigator.clipboard.writeText(markdown).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+      // Create worksheet data with headers
+      const wsData = [
+        [
+          'File',
+          'Column Type (柱符号)',
+          'Dimensions (柱形)',
+          'Main Reinforcement Count (主筋本数)',
+          'Main Reinforcement Size (主筋径)',
+          'Hoop Reinforcement Size (帯筋径)',
+          'Hoop Reinforcement Spacing (帯筋ピッチ)',
+        ],
+        ...expandedData.map(row => [
+          row.sourceFileName,
+          row.columnType,
+          row.columnDimensions,
+          row.mainReinforcementCount,
+          row.mainReinforcementSize,
+          row.hoopReinforcementSize,
+          row.hoopReinforcementSpacing,
+        ]),
+      ];
+
+      // Create workbook and worksheet
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+      // Set column widths
+      ws['!cols'] = [
+        { wch: 25 }, // File
+        { wch: 15 }, // Column Type
+        { wch: 15 }, // Dimensions
+        { wch: 20 }, // Main Count
+        { wch: 18 }, // Main Size
+        { wch: 18 }, // Hoop Size
+        { wch: 22 }, // Hoop Spacing
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Reinforcement Data');
+
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const filename = `reinforcement_data_${timestamp}.xlsx`;
+
+      // Download the file
+      XLSX.writeFile(wb, filename);
+    } catch (error) {
+      console.error('Export failed:', error);
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -38,22 +86,25 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
           </span>
         </div>
         <button
-          onClick={handleCopyMarkdown}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all"
+          onClick={handleExportExcel}
+          disabled={exporting}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all disabled:opacity-50"
         >
-          {copied ? (
+          {exporting ? (
             <>
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-green-600">
-                <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
+              <svg className="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              Copied!
+              Exporting...
             </>
           ) : (
             <>
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-gray-500">
-                <path fillRule="evenodd" d="M15.988 3.012A2.25 2.25 0 0 1 18 5.25v6.5A2.25 2.25 0 0 1 15.75 14H13.5V7A2.5 2.5 0 0 0 11 4.5H8.128a2.252 2.252 0 0 1 1.884-1.488A2.25 2.25 0 0 1 12.25 1h1.5a2.25 2.25 0 0 1 2.238 2.012ZM11 7.5a1 1 0 0 1 1-1h2.5a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-2.5a1 1 0 0 1-1-1v-10Zm-9 1a1 1 0 0 1 1-1h2.5a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-10Z" clipRule="evenodd" />
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-green-600">
+                <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
               </svg>
-              Copy as Markdown
+              Export as Excel
             </>
           )}
         </button>
@@ -98,3 +149,4 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     </div>
   );
 };
+
