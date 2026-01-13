@@ -1,17 +1,14 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { ColumnReinforcementData } from '../types';
-import { transformForExport } from '../utils/dataTransform';
+import { ExpandedReinforcementData } from '../types';
 
 interface ResultsTableProps {
-  data: ColumnReinforcementData[];
+  data: ExpandedReinforcementData[];
+  hasFoundationData?: boolean;
 }
 
-export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
+export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationData = false }) => {
   const [exporting, setExporting] = useState(false);
-
-  // Transform data for display (same as Excel format)
-  const expandedData = useMemo(() => transformForExport(data), [data]);
 
   if (data.length === 0) {
     return (
@@ -24,45 +21,85 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
   const handleExportExcel = () => {
     setExporting(true);
     try {
-      // Create worksheet data with headers
-      const wsData = [
-        [
-          'File',
-          'Column Type (柱符号)',
-          'Width (幅)',
-          'Height (せい)',
-          'Main Count (主筋本数)',
-          'Main Size (主筋径)',
-          'Hoop Size (帯筋径)',
-          'Hoop Spacing (帯筋ピッチ)',
-        ],
-        ...expandedData.map(row => [
-          row.sourceFileName,
-          row.columnType,
-          row.dimensionWidth,
-          row.dimensionHeight,
-          row.mainReinforcementCount,
-          row.mainReinforcementSize,
-          row.hoopReinforcementSize,
-          row.hoopReinforcementSpacing,
-        ]),
-      ];
+      // Build headers dynamically based on whether foundation data exists
+      const headers = hasFoundationData
+        ? [
+            'Foundation (基礎)',
+            'File',
+            'Column Type (柱符号)',
+            'Width (幅)',
+            'Height (せい)',
+            'Main Count (主筋本数)',
+            'Main Size (主筋径)',
+            'Hoop Size (帯筋径)',
+            'Hoop Spacing (帯筋ピッチ)',
+          ]
+        : [
+            'File',
+            'Column Type (柱符号)',
+            'Width (幅)',
+            'Height (せい)',
+            'Main Count (主筋本数)',
+            'Main Size (主筋径)',
+            'Hoop Size (帯筋径)',
+            'Hoop Spacing (帯筋ピッチ)',
+          ];
+
+      // Build row data
+      const rows = data.map(row => 
+        hasFoundationData
+          ? [
+              row.foundation || '',
+              row.sourceFileName,
+              row.columnType,
+              row.dimensionWidth,
+              row.dimensionHeight,
+              row.mainReinforcementCount,
+              row.mainReinforcementSize,
+              row.hoopReinforcementSize,
+              row.hoopReinforcementSpacing,
+            ]
+          : [
+              row.sourceFileName,
+              row.columnType,
+              row.dimensionWidth,
+              row.dimensionHeight,
+              row.mainReinforcementCount,
+              row.mainReinforcementSize,
+              row.hoopReinforcementSize,
+              row.hoopReinforcementSpacing,
+            ]
+      );
+
+      const wsData = [headers, ...rows];
 
       // Create workbook and worksheet
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(wsData);
 
       // Set column widths
-      ws['!cols'] = [
-        { wch: 25 }, // File
-        { wch: 15 }, // Column Type
-        { wch: 10 }, // Width
-        { wch: 10 }, // Height
-        { wch: 15 }, // Main Count
-        { wch: 12 }, // Main Size
-        { wch: 12 }, // Hoop Size
-        { wch: 15 }, // Hoop Spacing
-      ];
+      ws['!cols'] = hasFoundationData
+        ? [
+            { wch: 12 }, // Foundation
+            { wch: 20 }, // File
+            { wch: 15 }, // Column Type
+            { wch: 10 }, // Width
+            { wch: 10 }, // Height
+            { wch: 12 }, // Main Count
+            { wch: 10 }, // Main Size
+            { wch: 10 }, // Hoop Size
+            { wch: 12 }, // Hoop Spacing
+          ]
+        : [
+            { wch: 25 }, // File
+            { wch: 15 }, // Column Type
+            { wch: 10 }, // Width
+            { wch: 10 }, // Height
+            { wch: 15 }, // Main Count
+            { wch: 12 }, // Main Size
+            { wch: 12 }, // Hoop Size
+            { wch: 15 }, // Hoop Spacing
+          ];
 
       XLSX.utils.book_append_sheet(wb, ws, 'Reinforcement Data');
 
@@ -85,8 +122,13 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold text-gray-800">Consolidated Reinforcement Schedule</h2>
           <span className="text-xs font-medium px-2.5 py-0.5 rounded bg-indigo-100 text-indigo-800">
-            {expandedData.length} Rows
+            {data.length} Rows
           </span>
+          {hasFoundationData && (
+            <span className="text-xs font-medium px-2.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+              Foundation Linked
+            </span>
+          )}
         </div>
         <button
           onClick={handleExportExcel}
@@ -116,6 +158,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
         <table className="w-full text-left">
           <thead>
             <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider">
+              {hasFoundationData && (
+                <th className="px-4 py-3 font-semibold border-b border-gray-200">Foundation</th>
+              )}
               <th className="px-4 py-3 font-semibold border-b border-gray-200">File</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">Column Type</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">Width (幅)</th>
@@ -127,11 +172,16 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {expandedData.map((row, index) => (
+            {data.map((row, index) => (
               <tr 
                 key={`${row.columnType}-${index}`} 
                 className="hover:bg-gray-50 transition-colors duration-150"
               >
+                {hasFoundationData && (
+                  <td className="px-4 py-3 text-sm font-semibold text-emerald-700">
+                    {row.foundation || '-'}
+                  </td>
+                )}
                 <td className="px-4 py-3 text-xs text-gray-500 font-mono">
                   {row.sourceFileName}
                 </td>
@@ -164,3 +214,4 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     </div>
   );
 };
+

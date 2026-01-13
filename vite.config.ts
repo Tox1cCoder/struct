@@ -7,6 +7,9 @@ export default defineConfig(({ mode }) => {
     // GitHub Pages usually serves from a subdirectory (the repo name).
     // If you are using a custom domain, change this to '/'.
     // We try to auto-detect the repo name from package.json name or assume root if unavailable.
-    base: './', 
+    base: './',
+    server: {
+      host: true, // Expose to network (0.0.0.0)
+    },
   };
 });
