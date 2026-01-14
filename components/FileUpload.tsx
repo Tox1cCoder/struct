@@ -7,6 +7,7 @@ interface FileUploadProps {
   description?: string;
   iconColor?: 'indigo' | 'emerald';
   zoneId: string; // Unique ID for this upload zone
+  isActiveTab?: boolean; // Whether this tab is currently active
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({ 
@@ -16,14 +17,33 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   description = 'Click to browse or drag & drop files here',
   iconColor = 'indigo',
   zoneId,
+  isActiveTab = true,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const zoneRef = useRef<HTMLDivElement>(null);
-  const [isFocused, setIsFocused] = useState(false);
+  
+  // Use refs to avoid stale closures
+  const isActiveTabRef = useRef(isActiveTab);
+  const disabledRef = useRef(disabled);
+  const onFilesSelectRef = useRef(onFilesSelect);
+  
+  // Keep refs in sync
+  useEffect(() => {
+    isActiveTabRef.current = isActiveTab;
+  }, [isActiveTab]);
+  
+  useEffect(() => {
+    disabledRef.current = disabled;
+  }, [disabled]);
+  
+  useEffect(() => {
+    onFilesSelectRef.current = onFilesSelect;
+  }, [onFilesSelect]);
 
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
-      if (disabled || !isFocused) return;
+      // Only handle paste when tab is active and not disabled
+      if (disabledRef.current || !isActiveTabRef.current) return;
 
       const items = event.clipboardData?.items;
       if (!items) return;
@@ -36,20 +56,22 @@ export const FileUpload: React.FC<FileUploadProps> = ({
           const file = item.getAsFile();
           if (file) {
             pastedFiles.push(file);
+            event.preventDefault(); // Prevent default browser behavior
           }
         }
       }
 
       if (pastedFiles.length > 0) {
-        onFilesSelect(pastedFiles);
+        onFilesSelectRef.current(pastedFiles);
       }
     };
 
+    // Global paste listener
     document.addEventListener('paste', handlePaste);
     return () => {
       document.removeEventListener('paste', handlePaste);
     };
-  }, [onFilesSelect, disabled, isFocused]);
+  }, []); // Empty deps - use refs for dynamic values
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files.length > 0) {
@@ -99,12 +121,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   return (
     <div 
       ref={zoneRef}
-      tabIndex={0}
-      onFocus={() => setIsFocused(true)}
-      onBlur={() => setIsFocused(false)}
       className={`w-full border-2 border-dashed rounded-xl p-8 text-center transition-colors duration-200 outline-none
-        ${disabled ? 'opacity-50 cursor-not-allowed border-gray-300' : `${colors.border} cursor-pointer`}
-        ${isFocused && !disabled ? `ring-2 ${colors.focus} ring-offset-2` : ''}`}
+        ${disabled ? 'opacity-50 cursor-not-allowed border-gray-300' : `${colors.border} cursor-pointer`}`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onClick={() => !disabled && fileInputRef.current?.click()}
@@ -128,12 +146,18 @@ export const FileUpload: React.FC<FileUploadProps> = ({
         </div>
         <div className="flex flex-col items-center">
           <h3 className="text-base font-semibold text-gray-900">{title}</h3>
-          <p className="text-sm text-gray-500 mt-1">{description}</p>
+          <p className="text-sm text-gray-500 mt-1">Click to browse or drag & drop</p>
+          <p className="text-sm text-gray-500">Press <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">Ctrl+V</kbd> to paste</p>
           <div className="mt-2 flex items-center gap-2">
              <span className="inline-flex items-center rounded-md bg-gray-50 px-2 py-1 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-500/10">Multiple files</span>
              <span className="text-xs text-gray-400">PDF & Images</span>
           </div>
-          {isFocused && <span className="mt-2 text-xs text-gray-400">Ctrl+V to paste image</span>}
+          {isActiveTab && !disabled && (
+            <span className="mt-2 text-xs text-green-600 font-medium flex items-center gap-1">
+              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+              Ready to receive paste
+            </span>
+          )}
         </div>
       </div>
     </div>

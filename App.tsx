@@ -114,29 +114,33 @@ const App: React.FC = () => {
 
     try {
       const data = await extractFrameData(base64, mimeType);
-      // Since one image may contain multiple frames, we'll use the first one
-      // or create multiple entries if needed
+      
       if (data.length > 0) {
-        setFrameResults(prev => prev.map(r => 
-          r.id === id ? { ...r, status: 'SUCCESS', data: data[0] } : r
-        ));
-        // If there are additional frames, add them as new entries
-        if (data.length > 1) {
-          const additionalEntries: FrameFileResult[] = data.slice(1).map((frame, idx) => ({
-            id: `${id}-extra-${idx}`,
-            imagePreview: prev.find(r => r.id === id)?.imagePreview || '',
-            status: 'SUCCESS' as const,
-            data: frame,
-            error: undefined
-          }));
-          setFrameResults(prev => {
-            const existingEntry = prev.find(r => r.id === id);
-            return [...prev, ...additionalEntries.map(e => ({
-              ...e,
-              imagePreview: existingEntry?.imagePreview || ''
-            }))];
-          });
-        }
+        // Handle both single and multiple frames in one state update
+        setFrameResults(prev => {
+          // Get the image preview from the original entry
+          const originalEntry = prev.find(r => r.id === id);
+          const imagePreview = originalEntry?.imagePreview || '';
+          
+          // Update the original entry with the first frame
+          const updatedEntries = prev.map(r => 
+            r.id === id ? { ...r, status: 'SUCCESS' as const, data: data[0] } : r
+          );
+          
+          // Add additional entries for extra frames (if any)
+          if (data.length > 1) {
+            const additionalEntries: FrameFileResult[] = data.slice(1).map((frame, idx) => ({
+              id: `${id}-extra-${idx}`,
+              imagePreview: imagePreview,
+              status: 'SUCCESS' as const,
+              data: frame,
+              error: undefined
+            }));
+            return [...updatedEntries, ...additionalEntries];
+          }
+          
+          return updatedEntries;
+        });
       } else {
         setFrameResults(prev => prev.map(r => 
           r.id === id ? { ...r, status: 'ERROR', error: 'No frame data found in image' } : r
@@ -317,6 +321,7 @@ const App: React.FC = () => {
                     description="Column spec sheets with 主筋, 帯筋 data"
                     iconColor="indigo"
                     zoneId="reinforcement"
+                    isActiveTab={activeTab === 'column'}
                   />
                   {reinfResults.length > 0 && (
                     <div className="mt-4">

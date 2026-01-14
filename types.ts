@@ -53,6 +53,8 @@ export interface FrameData {
   topRebarValue: string;    // 上端筋 value - spacing for FW, count for FG
   bottomRebarD: string;     // 下端筋 rebar size (e.g., "D13", "D25")
   bottomRebarValue: string; // 下端筋 value - spacing for FW, count for FG
+  stirrupD: string;         // St. rebar size (e.g., "D13") - FG only, blank for FW
+  stirrupValue: string;     // St. value/spacing (e.g., "100") - FG only, blank for FW
 }
 
 export interface FrameFileResult {

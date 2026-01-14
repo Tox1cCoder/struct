@@ -24,6 +24,8 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data }) =>
         '上端筋 Value',
         '下端筋 D',
         '下端筋 Value',
+        'St. D',
+        'St. Value',
       ];
 
       const rows = data.map(row => [
@@ -34,6 +36,8 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data }) =>
         row.topRebarValue,
         row.bottomRebarD,
         row.bottomRebarValue,
+        row.stirrupD || '',
+        row.stirrupValue || '',
       ]);
 
       const wsData = [headers, ...rows];
@@ -49,6 +53,8 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data }) =>
         { wch: 10 }, // 上端筋 Value
         { wch: 10 }, // 下端筋 D
         { wch: 10 }, // 下端筋 Value
+        { wch: 10 }, // St. D
+        { wch: 10 }, // St. Value
       ];
 
       XLSX.utils.book_append_sheet(wb, ws, 'Frame Data');
@@ -106,6 +112,7 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data }) =>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">H</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200 bg-amber-50" colSpan={2}>上端筋</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200 bg-orange-50" colSpan={2}>下端筋</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200 bg-blue-50" colSpan={2}>St.</th>
             </tr>
             <tr className="bg-gray-50 text-gray-500 text-xs">
               <th className="border-b border-gray-200"></th>
@@ -115,6 +122,8 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data }) =>
               <th className="px-4 py-2 font-medium border-b border-gray-200 bg-amber-50/50">Value</th>
               <th className="px-4 py-2 font-medium border-b border-gray-200 bg-orange-50/50">D</th>
               <th className="px-4 py-2 font-medium border-b border-gray-200 bg-orange-50/50">Value</th>
+              <th className="px-4 py-2 font-medium border-b border-gray-200 bg-blue-50/50">D</th>
+              <th className="px-4 py-2 font-medium border-b border-gray-200 bg-blue-50/50">Value</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -148,6 +157,12 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data }) =>
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700 bg-orange-50/30 font-mono">
                   {row.bottomRebarValue}
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-700 bg-blue-50/30 font-mono">
+                  {row.stirrupD || '-'}
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-700 bg-blue-50/30 font-mono">
+                  {row.stirrupValue || '-'}
                 </td>
               </tr>
             ))}

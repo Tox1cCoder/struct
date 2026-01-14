@@ -139,13 +139,45 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
       throw new Error("No data returned from the model.");
     }
 
-    const rawData = JSON.parse(jsonText) as ColumnReinforcementData[];
+    let rawData: any;
+    try {
+      rawData = JSON.parse(jsonText);
+    } catch (parseError) {
+      console.error("JSON Parse Error:", parseError);
+      console.error("Raw response text:", jsonText);
+      throw new Error(`Failed to parse JSON response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+    }
+
+    // Ensure we have an array
+    if (!Array.isArray(rawData)) {
+      console.warn('Expected array from model, got:', typeof rawData);
+      if (typeof rawData === 'object' && rawData !== null) {
+        rawData = [rawData];
+      } else {
+        throw new Error(`Invalid response format - expected array, got ${typeof rawData}`);
+      }
+    }
+
+    // Validate each item has required fields
+    const validatedData = rawData.filter((item: any) => {
+      if (!item.columnType || !item.columnDimensions) {
+        console.warn('Skipping invalid column data:', item);
+        return false;
+      }
+      return true;
+    });
+
+    if (validatedData.length === 0) {
+      throw new Error('No valid column data found in response');
+    }
+
+    console.log(`Extracted ${validatedData.length} column(s) from document`);
 
     // Robust post-processing to clean up any remaining parentheses (half-width or full-width)
     // Regex: Match a space (optional) followed by ( or （, any content, then ) or ）
-    const cleanValue = (val: string) => val.replace(/\s*[\(（].*?[\)）]/g, '').trim();
+    const cleanValue = (val: string) => val?.replace(/\s*[\(（].*?[\)）]/g, '').trim() || '';
 
-    return rawData.map(item => ({
+    return validatedData.map((item: ColumnReinforcementData) => ({
       ...item,
       mainReinforcement: cleanValue(item.mainReinforcement),
       hoopReinforcement: cleanValue(item.hoopReinforcement),
@@ -251,7 +283,9 @@ These images show a table format with:
 - Row "B×D" contains dimensions directly (e.g., "500x500") → Split into B="500" and H="500"
 - Row "上端筋" (Top reinforcement) contains values like "4-D25" or "6-D25"
 - Row "下端筋" (Bottom reinforcement) contains values like "4-D25" or "6-D25"
+- Row "St." (Stirrup reinforcement) contains values like "□-D13@100" or "-D13@100"
 - Extract: Split "4-D25" into D="D25" and value="4"
+- Extract St.: Split "□-D13@100" into D="D13" and value="100" (ignore the □ symbol)
 
 **IMPORTANT: When FG has multiple columns (multiple 位置), the values are typically the SAME. Extract ONLY ONE entry per frame name (符号) using values from the FIRST (leftmost) column. Do NOT create separate entries for each column.**
 
@@ -269,6 +303,8 @@ These images show a table format with:
    - topRebarValue: From ﾖｺ, the spacing (e.g., "200" from "D13@200")
    - bottomRebarD: From ﾀﾃ, the rebar size (e.g., "D13" from "D13@200")
    - bottomRebarValue: From ﾀﾃ, the spacing (e.g., "200" from "D13@200")
+   - stirrupD: Leave BLANK (empty string "") - FW doesn't have St. field
+   - stirrupValue: Leave BLANK (empty string "") - FW doesn't have St. field
 
 3. **For FG type:**
    - frameName: Value from 符号 row (e.g., "FG1") - extract ONCE per unique 符号
@@ -278,6 +314,8 @@ These images show a table format with:
    - topRebarValue: From 上端筋 FIRST column, the count (e.g., "4" from "4-D25")
    - bottomRebarD: From 下端筋 FIRST column, the rebar size (e.g., "D25" from "4-D25")
    - bottomRebarValue: From 下端筋 FIRST column, the count (e.g., "4" from "4-D25")
+   - stirrupD: From St. FIRST column, the rebar size (e.g., "D13" from "□-D13@100")
+   - stirrupValue: From St. FIRST column, the spacing value (e.g., "100" from "□-D13@100")
 
 4. **For each unique frame name (符号), output ONLY ONE entry. Multiple columns with different 位置 but same 符号 should be treated as ONE frame.**
 
@@ -345,9 +383,17 @@ export const extractFrameData = async (base64Data: string, mimeType: string): Pr
               bottomRebarValue: {
                 type: Type.STRING,
                 description: "下端筋 value - spacing for FW (e.g., '200') or count for FG (e.g., '4')"
+              },
+              stirrupD: {
+                type: Type.STRING,
+                description: "St. rebar size (e.g., 'D13') - FG only, empty string for FW"
+              },
+              stirrupValue: {
+                type: Type.STRING,
+                description: "St. spacing value (e.g., '100') - FG only, empty string for FW"
               }
             },
-            required: ['frameName', 'b', 'h', 'topRebarD', 'topRebarValue', 'bottomRebarD', 'bottomRebarValue']
+            required: ['frameName', 'b', 'h', 'topRebarD', 'topRebarValue', 'bottomRebarD', 'bottomRebarValue', 'stirrupD', 'stirrupValue']
           }
         }
       }
@@ -358,12 +404,45 @@ export const extractFrameData = async (base64Data: string, mimeType: string): Pr
       throw new Error("No data returned from the model.");
     }
 
-    const rawData = JSON.parse(jsonText) as FrameData[];
+    let rawData: any;
+    try {
+      rawData = JSON.parse(jsonText);
+    } catch (parseError) {
+      console.error("JSON Parse Error:", parseError);
+      console.error("Raw response text:", jsonText);
+      throw new Error(`Failed to parse JSON response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+    }
+
+    // Ensure we have an array (handle both array and single object)
+    if (!Array.isArray(rawData)) {
+      console.warn('Expected array from model, got:', typeof rawData);
+      // If it's a single object, wrap it in an array
+      if (typeof rawData === 'object' && rawData !== null) {
+        rawData = [rawData];
+      } else {
+        throw new Error(`Invalid response format - expected array, got ${typeof rawData}`);
+      }
+    }
+
+    // Validate each item has required fields
+    const validatedData = rawData.filter((item: any) => {
+      if (!item.frameName || !item.b || !item.h) {
+        console.warn('Skipping invalid frame data:', item);
+        return false;
+      }
+      return true;
+    });
+
+    if (validatedData.length === 0) {
+      throw new Error('No valid frame data found in response');
+    }
+
+    console.log(`Extracted ${validatedData.length} frame(s) from image`);
 
     // Post-processing: Clean any remaining parentheses content
-    const cleanValue = (val: string) => val.replace(/\s*[\(（].*?[\)）]/g, '').trim();
+    const cleanValue = (val: string) => val?.replace(/\s*[\(（].*?[\)）]/g, '').trim() || '';
 
-    return rawData.map(item => ({
+    return validatedData.map((item: FrameData) => ({
       ...item,
       topRebarD: cleanValue(item.topRebarD),
       bottomRebarD: cleanValue(item.bottomRebarD),
