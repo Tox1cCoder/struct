@@ -36,8 +36,31 @@ export function mergeReinforcementWithFoundation(
   }
 
   // Merge foundation info into expanded data
-  return expandedData.map(row => ({
-    ...row,
-    foundation: columnToFoundationMap.get(row.columnType) || '',
-  }));
+  const result: ExpandedReinforcementData[] = [];
+
+  for (const row of expandedData) {
+    const constructionType = row.columnType;
+    const foundationStr = columnToFoundationMap.get(constructionType);
+
+    if (foundationStr) {
+      // If found, check if it contains multiple foundations (comma separated)
+      const foundations = foundationStr.split(',').map(f => f.trim());
+      
+      // Create a row for each foundation
+      for (const foundation of foundations) {
+        result.push({
+          ...row,
+          foundation: foundation
+        });
+      }
+    } else {
+      // No foundation found, keep as is (with empty foundation)
+      result.push({
+        ...row,
+        foundation: ''
+      });
+    }
+  }
+
+  return result;
 }

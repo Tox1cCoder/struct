@@ -25,7 +25,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
       const headers = hasFoundationData
         ? [
             'Foundation (基礎)',
-            'File',
             'Column Type (柱符号)',
             'Width (幅)',
             'Height (せい)',
@@ -35,7 +34,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
             'Hoop Spacing (帯筋ピッチ)',
           ]
         : [
-            'File',
             'Column Type (柱符号)',
             'Width (幅)',
             'Height (せい)',
@@ -50,7 +48,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
         hasFoundationData
           ? [
               row.foundation || '',
-              row.sourceFileName,
               row.columnType,
               row.dimensionWidth,
               row.dimensionHeight,
@@ -60,7 +57,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
               row.hoopReinforcementSpacing,
             ]
           : [
-              row.sourceFileName,
               row.columnType,
               row.dimensionWidth,
               row.dimensionHeight,
@@ -81,7 +77,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
       ws['!cols'] = hasFoundationData
         ? [
             { wch: 12 }, // Foundation
-            { wch: 20 }, // File
             { wch: 15 }, // Column Type
             { wch: 10 }, // Width
             { wch: 10 }, // Height
@@ -91,7 +86,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
             { wch: 12 }, // Hoop Spacing
           ]
         : [
-            { wch: 25 }, // File
             { wch: 15 }, // Column Type
             { wch: 10 }, // Width
             { wch: 10 }, // Height
@@ -161,7 +155,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
               {hasFoundationData && (
                 <th className="px-4 py-3 font-semibold border-b border-gray-200">Foundation</th>
               )}
-              <th className="px-4 py-3 font-semibold border-b border-gray-200">File</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">Column Type</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">Width (幅)</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">Height (せい)</th>
@@ -182,9 +175,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
                     {row.foundation || '-'}
                   </td>
                 )}
-                <td className="px-4 py-3 text-xs text-gray-500 font-mono">
-                  {row.sourceFileName}
-                </td>
                 <td className="px-4 py-3 text-sm font-bold text-gray-900">
                   {row.columnType}
                 </td>

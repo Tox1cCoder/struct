@@ -67,7 +67,6 @@ export function transformForExport(data: ColumnReinforcementData[]): ExpandedRei
     // Create a row for each column type
     for (const colType of columnTypes) {
       result.push({
-        sourceFileName: item.sourceFileName || '',
         columnType: colType,
         dimensionWidth: dimensions.width,
         dimensionHeight: dimensions.height,

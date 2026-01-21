@@ -16,7 +16,6 @@ export interface FoundationColumnData {
 // Expanded data type with split columns for Excel export (includes optional foundation)
 export interface ExpandedReinforcementData {
   foundation?: string;
-  sourceFileName: string;
   columnType: string;
   dimensionWidth: string;
   dimensionHeight: string;
