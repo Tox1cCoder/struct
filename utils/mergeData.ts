@@ -4,6 +4,7 @@ import { transformForExport } from './dataTransform';
 /**
  * Merge reinforcement data with foundation-column mapping.
  * Links foundation to column types when both data sources are available.
+ * Auto-fills foundation for F-prefixed columns (F7, F1A, etc.) when no mapping exists.
  */
 export function mergeReinforcementWithFoundation(
   reinforcementData: ColumnReinforcementData[],
@@ -12,15 +13,11 @@ export function mergeReinforcementWithFoundation(
   // First, transform reinforcement data to expanded format
   const expandedData = transformForExport(reinforcementData);
 
-  // If no foundation data, return expanded data without foundation field
-  if (foundationData.length === 0) {
-    return expandedData;
-  }
-
   // Create a map of columnType -> foundation for quick lookup
   // Note: A foundation can have multiple columns, but we map column -> foundation
   const columnToFoundationMap = new Map<string, string>();
   
+  // Build the mapping from foundation data (if provided)
   for (const fc of foundationData) {
     // Handle comma-separated column types in foundation data
     const columns = fc.columnType.split(',').map(c => c.trim());
@@ -40,7 +37,13 @@ export function mergeReinforcementWithFoundation(
 
   for (const row of expandedData) {
     const constructionType = row.columnType;
-    const foundationStr = columnToFoundationMap.get(constructionType);
+    let foundationStr = columnToFoundationMap.get(constructionType);
+
+    // Auto-fill: If no foundation mapping exists and column type matches F pattern (F7, F1A, etc.)
+    // then use the column type as the foundation
+    if (!foundationStr && /^F\d+[A-Z]?$/i.test(constructionType)) {
+      foundationStr = constructionType;
+    }
 
     if (foundationStr) {
       // If found, check if it contains multiple foundations (comma separated)

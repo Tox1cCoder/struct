@@ -43,12 +43,21 @@ export const FoundationTextInput: React.FC<FoundationTextInputProps> = ({ onData
         value={text}
         onChange={handleTextChange}
         disabled={disabled}
-        placeholder={`Paste mappings in "F11 : C1" format, one per line...
+        placeholder={`Paste mappings in "F : C : FC" format, one per line...
 
-Example:
-F11 : C1
-F12 : C1A
-F15A(SGL-***) : C3`}
+Example (with C):
+F1A : C3 : -
+F11 : C1 : -
+
+Example (with FC):
+F2A : - : FC1
+F12 : - : FC2
+
+Example (F-column auto-fills foundation):
+- : F7 : -
+
+Old format still supported:
+F11 : C1`}
         className={`w-full h-40 p-3 text-sm font-mono border rounded-lg resize-none
           ${disabled 
             ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
