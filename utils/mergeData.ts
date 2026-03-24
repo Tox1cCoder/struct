@@ -4,7 +4,11 @@ import { transformForExport } from './dataTransform';
 /**
  * Merge reinforcement data with foundation-column mapping.
  * Links foundation to column types when both data sources are available.
- * Auto-fills foundation for F-prefixed columns (F7, F1A, etc.) when no mapping exists.
+ *
+ * Behavior:
+ * - If foundation data is present, ALL foundation entries are shown (even if no PDF match).
+ * - Rows without a PDF match show blank for reinforcement fields.
+ * - B(柱) and H(柱) from the foundation-column linking are always shown when present.
  */
 export function mergeReinforcementWithFoundation(
   reinforcementData: ColumnReinforcementData[],
@@ -13,55 +17,61 @@ export function mergeReinforcementWithFoundation(
   // First, transform reinforcement data to expanded format
   const expandedData = transformForExport(reinforcementData);
 
-  // Create a map of columnType -> foundation for quick lookup
-  // Note: A foundation can have multiple columns, but we map column -> foundation
-  const columnToFoundationMap = new Map<string, string>();
-  
-  // Build the mapping from foundation data (if provided)
+  // If no foundation data provided — fall back to previous behaviour
+  if (foundationData.length === 0) {
+    return expandedData.map(row => ({ ...row, foundation: '' }));
+  }
+
+  // Build a lookup: columnType -> list of { foundation, bColumn, hColumn }
+  const columnToFoundations = new Map<string, Array<{ foundation: string; bColumn?: string; hColumn?: string }>>();
   for (const fc of foundationData) {
-    // Handle comma-separated column types in foundation data
     const columns = fc.columnType.split(',').map(c => c.trim());
     for (const col of columns) {
-      // If column already has a foundation, append (handle edge case of same column in multiple foundations)
-      const existing = columnToFoundationMap.get(col);
-      if (existing && existing !== fc.foundation) {
-        columnToFoundationMap.set(col, `${existing}, ${fc.foundation}`);
-      } else {
-        columnToFoundationMap.set(col, fc.foundation);
+      const existing = columnToFoundations.get(col) ?? [];
+      // Avoid duplicate foundation entries
+      if (!existing.find(e => e.foundation === fc.foundation)) {
+        existing.push({ foundation: fc.foundation, bColumn: fc.bColumn, hColumn: fc.hColumn });
       }
+      columnToFoundations.set(col, existing);
     }
   }
 
-  // Merge foundation info into expanded data
+  // Build a lookup for reinforcement data by columnType for quick access
+  const reinfByColumnType = new Map<string, ExpandedReinforcementData>();
+  for (const row of expandedData) {
+    reinfByColumnType.set(row.columnType, row);
+  }
+
   const result: ExpandedReinforcementData[] = [];
 
-  for (const row of expandedData) {
-    const constructionType = row.columnType;
-    let foundationStr = columnToFoundationMap.get(constructionType);
+  // Iterate all foundation entries to guarantee every F is shown
+  for (const fc of foundationData) {
+    const columns = fc.columnType.split(',').map(c => c.trim());
+    for (const col of columns) {
+      const reinfRow = reinfByColumnType.get(col);
 
-    // Auto-fill: If no foundation mapping exists and column type matches F pattern (F7, F1A, etc.)
-    // then use the column type as the foundation
-    if (!foundationStr && /^F\d+[A-Z]?$/i.test(constructionType)) {
-      foundationStr = constructionType;
-    }
-
-    if (foundationStr) {
-      // If found, check if it contains multiple foundations (comma separated)
-      const foundations = foundationStr.split(',').map(f => f.trim());
-      
-      // Create a row for each foundation
-      for (const foundation of foundations) {
+      if (reinfRow) {
         result.push({
-          ...row,
-          foundation: foundation
+          ...reinfRow,
+          foundation: fc.foundation,
+          bColumn: fc.bColumn,
+          hColumn: fc.hColumn,
+        });
+      } else {
+        // No PDF data for this column – show a blank row
+        result.push({
+          foundation: fc.foundation,
+          columnType: col,
+          bColumn: fc.bColumn,
+          hColumn: fc.hColumn,
+          dimensionWidth: '',
+          dimensionHeight: '',
+          mainReinforcementCount: '',
+          mainReinforcementSize: '',
+          hoopReinforcementSize: '',
+          hoopReinforcementSpacing: '',
         });
       }
-    } else {
-      // No foundation found, keep as is (with empty foundation)
-      result.push({
-        ...row,
-        foundation: ''
-      });
     }
   }
 

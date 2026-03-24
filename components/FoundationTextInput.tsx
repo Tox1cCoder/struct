@@ -43,18 +43,16 @@ export const FoundationTextInput: React.FC<FoundationTextInputProps> = ({ onData
         value={text}
         onChange={handleTextChange}
         disabled={disabled}
-        placeholder={`Paste mappings in "F : C : FC" format, one per line...
+        placeholder={`Paste mappings in "F : C : FC : BxH" format, one per line...
 
-Example (with C):
+Example:
+F110A : C1 : - : 400x400
+F112 : CP1 : - : 200x200
+F1A : C3 : - : 600x600
+
+(BxH column is optional)
 F1A : C3 : -
-F11 : C1 : -
-
-Example (with FC):
-F2A : - : FC1
 F12 : - : FC2
-
-Example (F-column auto-fills foundation):
-- : F7 : -
 
 Old format still supported:
 F11 : C1`}

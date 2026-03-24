@@ -10,6 +10,8 @@ export interface ColumnReinforcementData {
 export interface FoundationColumnData {
   foundation: string;
   columnType: string;
+  bColumn?: string;   // B dimension from the BxH field in the input
+  hColumn?: string;   // H dimension from the BxH field in the input
   sourceFileName?: string;
 }
 
@@ -17,6 +19,8 @@ export interface FoundationColumnData {
 export interface ExpandedReinforcementData {
   foundation?: string;
   columnType: string;
+  bColumn?: string;   // B(柱) from foundation linking data
+  hColumn?: string;   // H(柱) from foundation linking data
   dimensionWidth: string;
   dimensionHeight: string;
   mainReinforcementCount: string;

@@ -18,91 +18,76 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
     );
   }
 
+  // Whether any row has B/H column data
+  const hasBHData = data.some(row => row.bColumn || row.hColumn);
+
   const handleExportExcel = () => {
     setExporting(true);
     try {
-      // Build headers dynamically based on whether foundation data exists
-      const headers = hasFoundationData
-        ? [
-            'Foundation (基礎)',
-            'Column Type (柱符号)',
-            'Width (幅)',
-            'Height (せい)',
-            'Main Count (主筋本数)',
-            'Main Size (主筋径)',
-            'Hoop Size (帯筋径)',
-            'Hoop Spacing (帯筋ピッチ)',
-          ]
-        : [
-            'Column Type (柱符号)',
-            'Width (幅)',
-            'Height (せい)',
-            'Main Count (主筋本数)',
-            'Main Size (主筋径)',
-            'Hoop Size (帯筋径)',
-            'Hoop Spacing (帯筋ピッチ)',
-          ];
+      // Build headers dynamically
+      const headers: string[] = [];
+      if (hasFoundationData) headers.push('Foundation (基礎)');
+      headers.push('Column Type (柱符号)');
+      if (hasBHData) {
+        headers.push('柱_Lx');
+        headers.push('柱_Ly');
+      }
+      headers.push(
+        '柱型_Lx',
+        '柱型_Ly',
+        '柱型_主筋_本数',
+        '柱型_主筋_直径',
+        '柱型_Hoop_直径',
+        '柱型_Hoop_距離_最大',
+      );
 
       // Build row data
-      const rows = data.map(row => 
-        hasFoundationData
-          ? [
-              row.foundation || '',
-              row.columnType,
-              row.dimensionWidth,
-              row.dimensionHeight,
-              row.mainReinforcementCount,
-              row.mainReinforcementSize,
-              row.hoopReinforcementSize,
-              row.hoopReinforcementSpacing,
-            ]
-          : [
-              row.columnType,
-              row.dimensionWidth,
-              row.dimensionHeight,
-              row.mainReinforcementCount,
-              row.mainReinforcementSize,
-              row.hoopReinforcementSize,
-              row.hoopReinforcementSpacing,
-            ]
-      );
+      const rows = data.map(row => {
+        const cells: string[] = [];
+        if (hasFoundationData) cells.push(row.foundation || '');
+        cells.push(row.columnType);
+        if (hasBHData) {
+          cells.push(row.bColumn || '');
+          cells.push(row.hColumn || '');
+        }
+        cells.push(
+          row.dimensionWidth,
+          row.dimensionHeight,
+          row.mainReinforcementCount,
+          row.mainReinforcementSize,
+          row.hoopReinforcementSize,
+          row.hoopReinforcementSpacing,
+        );
+        return cells;
+      });
 
       const wsData = [headers, ...rows];
 
-      // Create workbook and worksheet
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(wsData);
 
       // Set column widths
-      ws['!cols'] = hasFoundationData
-        ? [
-            { wch: 12 }, // Foundation
-            { wch: 15 }, // Column Type
-            { wch: 10 }, // Width
-            { wch: 10 }, // Height
-            { wch: 12 }, // Main Count
-            { wch: 10 }, // Main Size
-            { wch: 10 }, // Hoop Size
-            { wch: 12 }, // Hoop Spacing
-          ]
-        : [
-            { wch: 15 }, // Column Type
-            { wch: 10 }, // Width
-            { wch: 10 }, // Height
-            { wch: 15 }, // Main Count
-            { wch: 12 }, // Main Size
-            { wch: 12 }, // Hoop Size
-            { wch: 15 }, // Hoop Spacing
-          ];
+      const colWidths: { wch: number }[] = [];
+      if (hasFoundationData) colWidths.push({ wch: 12 });
+      colWidths.push({ wch: 15 });
+      if (hasBHData) {
+        colWidths.push({ wch: 8 });
+        colWidths.push({ wch: 8 });
+      }
+      colWidths.push(
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 12 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 12 },
+      );
+      ws['!cols'] = colWidths;
 
       XLSX.utils.book_append_sheet(wb, ws, 'Reinforcement Data');
 
-      // Generate filename with timestamp
       const timestamp = new Date().toISOString().slice(0, 10);
-      const filename = `reinforcement_data_${timestamp}.xlsx`;
-
-      // Download the file
-      XLSX.writeFile(wb, filename);
+      XLSX.writeFile(wb, `reinforcement_data_${timestamp}.xlsx`);
     } catch (error) {
       console.error('Export failed:', error);
     } finally {
@@ -156,18 +141,24 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
                 <th className="px-4 py-3 font-semibold border-b border-gray-200">Foundation</th>
               )}
               <th className="px-4 py-3 font-semibold border-b border-gray-200">Column Type</th>
-              <th className="px-4 py-3 font-semibold border-b border-gray-200">Width (幅)</th>
-              <th className="px-4 py-3 font-semibold border-b border-gray-200">Height (せい)</th>
-              <th className="px-4 py-3 font-semibold border-b border-gray-200">Main Count</th>
-              <th className="px-4 py-3 font-semibold border-b border-gray-200">Main Size</th>
-              <th className="px-4 py-3 font-semibold border-b border-gray-200">Hoop Size</th>
-              <th className="px-4 py-3 font-semibold border-b border-gray-200">Hoop Spacing</th>
+              {hasBHData && (
+                <>
+                  <th className="px-4 py-3 font-semibold border-b border-gray-200">柱_Lx</th>
+                  <th className="px-4 py-3 font-semibold border-b border-gray-200">柱_Ly</th>
+                </>
+              )}
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Lx</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Ly</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_主筋_本数</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_主筋_直径</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Hoop_直径</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Hoop_距離_最大</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {data.map((row, index) => (
-              <tr 
-                key={`${row.columnType}-${index}`} 
+              <tr
+                key={`${row.foundation}-${row.columnType}-${index}`}
                 className="hover:bg-gray-50 transition-colors duration-150"
               >
                 {hasFoundationData && (
@@ -178,6 +169,16 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
                 <td className="px-4 py-3 text-sm font-bold text-gray-900">
                   {row.columnType}
                 </td>
+                {hasBHData && (
+                  <>
+                    <td className="px-4 py-3 text-sm text-indigo-700 font-mono">
+                      {row.bColumn || ''}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-indigo-700 font-mono">
+                      {row.hColumn || ''}
+                    </td>
+                  </>
+                )}
                 <td className="px-4 py-3 text-sm text-gray-700 font-mono">
                   {row.dimensionWidth}
                 </td>
@@ -204,4 +205,3 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
     </div>
   );
 };
-
