@@ -28,28 +28,24 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
       const headers: string[] = [];
       if (hasFoundationData) headers.push('Foundation (基礎)');
       headers.push('Column Type (柱符号)');
-      if (hasBHData) {
-        headers.push('柱_Lx');
-        headers.push('柱_Ly');
-      }
       headers.push(
-        '柱型_Lx',
-        '柱型_Ly',
+        '柱型_lx',
+        '柱型_ly',
         '柱型_主筋_本数',
         '柱型_主筋_直径',
         '柱型_Hoop_直径',
         '柱型_Hoop_距離_最大',
       );
+      if (hasBHData) {
+        headers.push('柱_lx');
+        headers.push('柱_ly');
+      }
 
       // Build row data
       const rows = data.map(row => {
         const cells: string[] = [];
         if (hasFoundationData) cells.push(row.foundation || '');
         cells.push(row.columnType);
-        if (hasBHData) {
-          cells.push(row.bColumn || '');
-          cells.push(row.hColumn || '');
-        }
         cells.push(
           row.dimensionWidth,
           row.dimensionHeight,
@@ -58,6 +54,10 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
           row.hoopReinforcementSize,
           row.hoopReinforcementSpacing,
         );
+        if (hasBHData) {
+          cells.push(row.bColumn || '');
+          cells.push(row.hColumn || '');
+        }
         return cells;
       });
 
@@ -70,10 +70,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
       const colWidths: { wch: number }[] = [];
       if (hasFoundationData) colWidths.push({ wch: 12 });
       colWidths.push({ wch: 15 });
-      if (hasBHData) {
-        colWidths.push({ wch: 8 });
-        colWidths.push({ wch: 8 });
-      }
       colWidths.push(
         { wch: 10 },
         { wch: 10 },
@@ -82,6 +78,10 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
         { wch: 10 },
         { wch: 12 },
       );
+      if (hasBHData) {
+        colWidths.push({ wch: 8 });
+        colWidths.push({ wch: 8 });
+      }
       ws['!cols'] = colWidths;
 
       XLSX.utils.book_append_sheet(wb, ws, 'Reinforcement Data');
@@ -141,18 +141,18 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
                 <th className="px-4 py-3 font-semibold border-b border-gray-200">Foundation</th>
               )}
               <th className="px-4 py-3 font-semibold border-b border-gray-200">Column Type</th>
-              {hasBHData && (
-                <>
-                  <th className="px-4 py-3 font-semibold border-b border-gray-200">柱_Lx</th>
-                  <th className="px-4 py-3 font-semibold border-b border-gray-200">柱_Ly</th>
-                </>
-              )}
-              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Lx</th>
-              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Ly</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_lx</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_ly</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_主筋_本数</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_主筋_直径</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Hoop_直径</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Hoop_距離_最大</th>
+              {hasBHData && (
+                <>
+                  <th className="px-4 py-3 font-semibold border-b border-gray-200">柱_lx</th>
+                  <th className="px-4 py-3 font-semibold border-b border-gray-200">柱_ly</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -169,16 +169,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
                 <td className="px-4 py-3 text-sm font-bold text-gray-900">
                   {row.columnType}
                 </td>
-                {hasBHData && (
-                  <>
-                    <td className="px-4 py-3 text-sm text-indigo-700 font-mono">
-                      {row.bColumn || ''}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-indigo-700 font-mono">
-                      {row.hColumn || ''}
-                    </td>
-                  </>
-                )}
                 <td className="px-4 py-3 text-sm text-gray-700 font-mono">
                   {row.dimensionWidth}
                 </td>
@@ -197,6 +187,16 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
                 <td className="px-4 py-3 text-sm text-gray-700 font-mono">
                   {row.hoopReinforcementSpacing}
                 </td>
+                {hasBHData && (
+                  <>
+                    <td className="px-4 py-3 text-sm text-indigo-700 font-mono">
+                      {row.bColumn || ''}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-indigo-700 font-mono">
+                      {row.hColumn || ''}
+                    </td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>

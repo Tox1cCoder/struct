@@ -46,10 +46,11 @@ export function parseFoundationColumnText(input: string): FoundationColumnData[]
       const cValue = parts[1];
       const fcValue = parts[2];
 
-      if (cValue !== '-' && cValue !== '') {
-        columnType = cValue;
-      } else if (fcValue !== '-' && fcValue !== '') {
+      if (fcValue !== '-' && fcValue !== '') {
+        // FC takes priority over C
         columnType = fcValue;
+      } else if (cValue !== '-' && cValue !== '') {
+        columnType = cValue;
       } else {
         // Both are blank or "-", skip this line
         continue;
