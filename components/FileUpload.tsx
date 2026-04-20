@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useEffect } from 'react';
 
 interface FileUploadProps {
   onFilesSelect: (files: File[]) => void;
@@ -8,6 +8,9 @@ interface FileUploadProps {
   iconColor?: 'indigo' | 'emerald';
   zoneId: string; // Unique ID for this upload zone
   isActiveTab?: boolean; // Whether this tab is currently active
+  accept?: string;
+  allowPaste?: boolean;
+  fileTypesLabel?: string;
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({ 
@@ -18,6 +21,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   iconColor = 'indigo',
   zoneId,
   isActiveTab = true,
+  accept = '.pdf,image/*',
+  allowPaste = true,
+  fileTypesLabel = 'PDF & Images',
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const zoneRef = useRef<HTMLDivElement>(null);
@@ -43,7 +49,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
       // Only handle paste when tab is active and not disabled
-      if (disabledRef.current || !isActiveTabRef.current) return;
+      if (disabledRef.current || !isActiveTabRef.current || !allowPaste) return;
 
       const items = event.clipboardData?.items;
       if (!items) return;
@@ -88,9 +94,20 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     if (disabled) return;
     
     // Accept both PDF and image files
-    const droppedFiles = Array.from(event.dataTransfer.files).filter(
-      (file: File) => file.type === 'application/pdf' || file.type.startsWith('image/')
-    );
+    const acceptsPdf = accept.includes('.pdf') || accept.includes('application/pdf');
+    const acceptsImage = accept.includes('image/');
+
+    const droppedFiles = Array.from(event.dataTransfer.files).filter((file: File) => {
+      if (file.type === 'application/pdf') {
+        return acceptsPdf;
+      }
+
+      if (file.type.startsWith('image/')) {
+        return acceptsImage;
+      }
+
+      return false;
+    });
     
     if (droppedFiles.length > 0) {
       onFilesSelect(droppedFiles);
@@ -132,7 +149,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
         type="file"
         ref={fileInputRef}
         onChange={handleFileChange}
-        accept=".pdf,image/*"
+        accept={accept}
         multiple
         className="hidden"
         disabled={disabled}
@@ -146,13 +163,15 @@ export const FileUpload: React.FC<FileUploadProps> = ({
         </div>
         <div className="flex flex-col items-center">
           <h3 className="text-base font-semibold text-gray-900">{title}</h3>
-          <p className="text-sm text-gray-500 mt-1">Click to browse or drag & drop</p>
-          <p className="text-sm text-gray-500">Press <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">Ctrl+V</kbd> to paste</p>
+          <p className="text-sm text-gray-500 mt-1">{description}</p>
+          {allowPaste && (
+            <p className="text-sm text-gray-500">Press <kbd className="px-1.5 py-0.5 bg-gray-100 border border-gray-300 rounded text-xs font-mono">Ctrl+V</kbd> to paste</p>
+          )}
           <div className="mt-2 flex items-center gap-2">
              <span className="inline-flex items-center rounded-md bg-gray-50 px-2 py-1 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-500/10">Multiple files</span>
-             <span className="text-xs text-gray-400">PDF & Images</span>
+             <span className="text-xs text-gray-400">{fileTypesLabel}</span>
           </div>
-          {isActiveTab && !disabled && (
+          {allowPaste && isActiveTab && !disabled && (
             <span className="mt-2 text-xs text-green-600 font-medium flex items-center gap-1">
               <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
               Ready to receive paste

@@ -1,7 +1,7 @@
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(() => {
   return {
     plugins: [react()],
     // GitHub Pages usually serves from a subdirectory (the repo name).

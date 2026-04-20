@@ -47,6 +47,39 @@ export interface FoundationFileResult {
   error?: string;
 }
 
+export interface CertifiedCoordinateData {
+  xAxis: string;
+  yAxis: string;
+  columnType: string;
+  sourceFileName?: string;
+}
+
+export interface CertifiedCoordinateFileResult {
+  id: string;
+  fileName: string;
+  status: ProcessingStatus;
+  data: CertifiedCoordinateData[];
+  error?: string;
+}
+
+export interface FoundationPlanCoordinateData {
+  foundation: string;
+  xAxis: string;
+  yAxis: string;
+  planColumnType: string;
+  isHighlighted?: boolean;
+  highlightColor?: string;
+  sourceFileName?: string;
+}
+
+export interface FoundationPlanCoordinateFileResult {
+  id: string;
+  fileName: string;
+  status: ProcessingStatus;
+  data: FoundationPlanCoordinateData[];
+  error?: string;
+}
+
 // Frame data (FW and FG types)
 export interface FrameData {
   frameName: string;        // e.g., "FW1", "FG1", "FG1A"

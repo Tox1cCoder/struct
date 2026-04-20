@@ -4,11 +4,14 @@ import { FoundationTextInput } from './components/FoundationTextInput';
 import { ResultsTable } from './components/ResultsTable';
 import { FrameImageInput } from './components/FrameImageInput';
 import { FrameResultsTable } from './components/FrameResultsTable';
-import { extractDataFromPdf, extractFrameData } from './services/geminiService';
-import { ColumnReinforcementData, FoundationColumnData, FileResult, FrameFileResult, FrameData } from './types';
+import { FoundationPriorityTextResult } from './components/FoundationPriorityTextResult';
+import { extractCertifiedCoordinateData, extractDataFromPdf, extractFoundationPlanCoordinateData, extractFrameData } from './services/geminiService';
+import { CertifiedCoordinateFileResult, FoundationColumnData, FileResult, FoundationPlanCoordinateFileResult, FrameFileResult, FrameData } from './types';
+import { getErrorMessage, logError } from './utils/errorHandling';
 import { mergeReinforcementWithFoundation } from './utils/mergeData';
+import { buildFoundationPriorityText } from './utils/mergeFoundationPriority';
 
-type TabType = 'column' | 'frame';
+type TabType = 'column' | 'frame' | 'priority';
 
 const App: React.FC = () => {
   // Active tab state
@@ -24,6 +27,12 @@ const App: React.FC = () => {
   // Frame extraction state
   const [frameResults, setFrameResults] = useState<FrameFileResult[]>([]);
   const [isFrameProcessing, setIsFrameProcessing] = useState(false);
+
+  // Foundation priority extraction state
+  const [certifiedResults, setCertifiedResults] = useState<CertifiedCoordinateFileResult[]>([]);
+  const [isCertifiedProcessing, setIsCertifiedProcessing] = useState(false);
+  const [foundationPlanResults, setFoundationPlanResults] = useState<FoundationPlanCoordinateFileResult[]>([]);
+  const [isFoundationPlanProcessing, setIsFoundationPlanProcessing] = useState(false);
 
   // Computed consolidated data
   const consolidatedReinfData = useMemo(() => 
@@ -45,6 +54,25 @@ const App: React.FC = () => {
       .filter(r => r.status === 'SUCCESS' && r.data)
       .map(r => r.data as FrameData),
     [frameResults]
+  );
+
+  const consolidatedCertifiedData = useMemo(() =>
+    certifiedResults
+      .filter(r => r.status === 'SUCCESS')
+      .flatMap(r => r.data.map(item => ({ ...item, sourceFileName: r.fileName }))),
+    [certifiedResults]
+  );
+
+  const consolidatedFoundationPlanData = useMemo(() =>
+    foundationPlanResults
+      .filter(r => r.status === 'SUCCESS')
+      .flatMap(r => r.data.map(item => ({ ...item, sourceFileName: r.fileName }))),
+    [foundationPlanResults]
+  );
+
+  const foundationPriorityText = useMemo(() =>
+    buildFoundationPriorityText(consolidatedCertifiedData, consolidatedFoundationPlanData),
+    [consolidatedCertifiedData, consolidatedFoundationPlanData]
   );
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -75,7 +103,8 @@ const App: React.FC = () => {
         r.id === id ? { ...r, status: 'SUCCESS', data } : r
       ));
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Processing failed';
+      logError(`Reinforcement extraction failed for ${file.name}`, err);
+      const errorMessage = getErrorMessage(err);
       setReinfResults(prev => prev.map(r => 
         r.id === id ? { ...r, status: 'ERROR', error: errorMessage } : r
       ));
@@ -147,7 +176,8 @@ const App: React.FC = () => {
         ));
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Processing failed';
+      logError(`Frame extraction failed for ${id}`, err);
+      const errorMessage = getErrorMessage(err);
       setFrameResults(prev => prev.map(r => 
         r.id === id ? { ...r, status: 'ERROR', error: errorMessage } : r
       ));
@@ -176,24 +206,116 @@ const App: React.FC = () => {
     setFrameResults([]);
   }, []);
 
+  const processCertifiedFile = async (file: File, id: string) => {
+    setCertifiedResults(prev => prev.map(r => r.id === id ? { ...r, status: 'PROCESSING' } : r));
+
+    try {
+      const data = await extractCertifiedCoordinateData(file);
+
+      setCertifiedResults(prev => prev.map(r =>
+        r.id === id ? { ...r, status: 'SUCCESS', data } : r
+      ));
+    } catch (err) {
+      logError(`Certified coordinate extraction failed for ${file.name}`, err);
+      const errorMessage = getErrorMessage(err);
+      setCertifiedResults(prev => prev.map(r =>
+        r.id === id ? { ...r, status: 'ERROR', error: errorMessage } : r
+      ));
+    }
+  };
+
+  const handleCertifiedFilesSelect = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
+
+    setIsCertifiedProcessing(true);
+
+    const newEntries: CertifiedCoordinateFileResult[] = files.map(file => ({
+      id: Math.random().toString(36).substring(7),
+      fileName: file.name,
+      status: 'PENDING',
+      data: []
+    }));
+
+    setCertifiedResults(prev => [...prev, ...newEntries]);
+
+    const processingPromises = newEntries.map((entry, index) =>
+      processCertifiedFile(files[index], entry.id)
+    );
+
+    await Promise.allSettled(processingPromises);
+    setIsCertifiedProcessing(false);
+  }, []);
+
+  const processFoundationPlanFile = async (file: File, id: string) => {
+    setFoundationPlanResults(prev => prev.map(r => r.id === id ? { ...r, status: 'PROCESSING' } : r));
+
+    try {
+      const data = await extractFoundationPlanCoordinateData(file);
+
+      setFoundationPlanResults(prev => prev.map(r =>
+        r.id === id ? { ...r, status: 'SUCCESS', data } : r
+      ));
+    } catch (err) {
+      logError(`Foundation plan extraction failed for ${file.name}`, err);
+      const errorMessage = getErrorMessage(err);
+      setFoundationPlanResults(prev => prev.map(r =>
+        r.id === id ? { ...r, status: 'ERROR', error: errorMessage } : r
+      ));
+    }
+  };
+
+  const handleFoundationPlanFilesSelect = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
+
+    setIsFoundationPlanProcessing(true);
+
+    const newEntries: FoundationPlanCoordinateFileResult[] = files.map(file => ({
+      id: Math.random().toString(36).substring(7),
+      fileName: file.name,
+      status: 'PENDING',
+      data: []
+    }));
+
+    setFoundationPlanResults(prev => [...prev, ...newEntries]);
+
+    const processingPromises = newEntries.map((entry, index) =>
+      processFoundationPlanFile(files[index], entry.id)
+    );
+
+    await Promise.allSettled(processingPromises);
+    setIsFoundationPlanProcessing(false);
+  }, []);
+
   const handleClearAll = () => {
     setReinfResults([]);
     setFoundationData([]);
     setIsReinfProcessing(false);
   };
 
+  const handlePriorityClearAll = () => {
+    setCertifiedResults([]);
+    setFoundationPlanResults([]);
+    setIsCertifiedProcessing(false);
+    setIsFoundationPlanProcessing(false);
+  };
+
   const hasAnyResults = reinfResults.length > 0;
   const hasFrameResults = frameResults.length > 0;
+  const hasPrioritySourceResults = certifiedResults.length > 0 || foundationPlanResults.length > 0;
+  const isPriorityProcessing = isCertifiedProcessing || isFoundationPlanProcessing;
 
-  const renderFileList = (results: FileResult[]) => (
+  const renderFileList = <T extends { id: string; fileName: string; status: FileResult['status']; data: unknown[]; error?: string }>(
+    results: T[],
+    title: string,
+  ) => (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
       <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-        <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Reinforcement Files</h4>
+        <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">{title}</h4>
       </div>
       <ul className="divide-y divide-gray-100 max-h-40 overflow-y-auto">
         {results.map((result) => (
-          <li key={result.id} className="px-4 py-2 flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <li key={result.id} className="px-4 py-2 flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2 min-w-0">
               {result.status === 'PENDING' && <div className="w-2 h-2 rounded-full bg-gray-300" />}
               {result.status === 'PROCESSING' && (
                 <svg className="animate-spin h-4 w-4 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -211,11 +333,21 @@ const App: React.FC = () => {
                   <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clipRule="evenodd" />
                 </svg>
               )}
-              <span className={`text-xs ${result.status === 'ERROR' ? 'text-red-600' : 'text-gray-700'} truncate max-w-[150px]`}>
-                {result.fileName}
-              </span>
+              <div className="min-w-0">
+                <span
+                  className={`text-xs ${result.status === 'ERROR' ? 'text-red-600' : 'text-gray-700'} block truncate max-w-[180px]`}
+                  title={result.fileName}
+                >
+                  {result.fileName}
+                </span>
+                {result.status === 'ERROR' && result.error && (
+                  <p className="mt-0.5 text-[11px] leading-4 text-red-500 break-words max-w-[220px]" title={result.error}>
+                    {result.error}
+                  </p>
+                )}
+              </div>
             </div>
-            <div className="text-xs">
+            <div className="text-xs flex-shrink-0">
               {result.status === 'PROCESSING' && <span className="text-indigo-600 font-medium">Processing...</span>}
               {result.status === 'SUCCESS' && <span className="text-green-600 font-medium">{result.data.length} items</span>}
               {result.status === 'ERROR' && <span className="text-red-600">Error</span>}
@@ -243,6 +375,15 @@ const App: React.FC = () => {
             <button 
               onClick={handleClearAll} 
               disabled={isReinfProcessing} 
+              className="text-xs text-red-600 hover:text-red-800 font-medium disabled:opacity-50"
+            >
+              Clear All
+            </button>
+          )}
+          {activeTab === 'priority' && hasPrioritySourceResults && (
+            <button
+              onClick={handlePriorityClearAll}
+              disabled={isPriorityProcessing}
               className="text-xs text-red-600 hover:text-red-800 font-medium disabled:opacity-50"
             >
               Clear All
@@ -283,6 +424,20 @@ const App: React.FC = () => {
                 Frame (FW/FG)
               </span>
             </button>
+            <button
+              onClick={() => setActiveTab('priority')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors
+                ${activeTab === 'priority'
+                  ? 'border-cyan-500 text-cyan-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+            >
+              <span className="flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m5.25 2.25a8.25 8.25 0 1 1-16.5 0 8.25 8.25 0 0 1 16.5 0Z" />
+                </svg>
+                Foundation Priority
+              </span>
+            </button>
           </nav>
         </div>
       </div>
@@ -318,14 +473,14 @@ const App: React.FC = () => {
                     onFilesSelect={handleReinfFilesSelect} 
                     disabled={isReinfProcessing}
                     title="Upload Reinforcement Docs"
-                    description="Column spec sheets with 主筋, 帯筋 data"
+                    description="Click to browse or drag & drop files here"
                     iconColor="indigo"
                     zoneId="reinforcement"
                     isActiveTab={activeTab === 'column'}
                   />
                   {reinfResults.length > 0 && (
                     <div className="mt-4">
-                      {renderFileList(reinfResults)}
+                      {renderFileList(reinfResults, 'Reinforcement Files')}
                     </div>
                   )}
                 </div>
@@ -408,6 +563,93 @@ const App: React.FC = () => {
                       <strong>Note:</strong> Frame data extracted from images. 
                       FW = Foundation Wall (布基礎), FG = Foundation Girder (地中梁/フーチング).
                       {' '}Always verify AI-extracted engineering data against original documents.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Foundation Priority Tab Content */}
+        {activeTab === 'priority' && (
+          <>
+            {!hasPrioritySourceResults && (
+              <div className="text-center mb-8">
+                <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl">
+                  Foundation Priority Extractor
+                </h2>
+                <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
+                  Join 認定柱脚資料 and 基礎伏図 by canonical grid placement tokens, then output plain-text foundation mappings.
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                    認定柱脚資料
+                  </h3>
+                  <FileUpload
+                    onFilesSelect={handleCertifiedFilesSelect}
+                    disabled={isCertifiedProcessing}
+                    title="Upload Certified Column Base PDFs"
+                    description="Click to browse or drag & drop PDF files here"
+                    iconColor="indigo"
+                    zoneId="certified-foundation"
+                    isActiveTab={activeTab === 'priority'}
+                    accept=".pdf,application/pdf"
+                    allowPaste={false}
+                    fileTypesLabel="PDF only"
+                  />
+                  {certifiedResults.length > 0 && (
+                    <div className="mt-4">
+                      {renderFileList(certifiedResults, 'Certified Files')}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    基礎伏図
+                  </h3>
+                  <FileUpload
+                    onFilesSelect={handleFoundationPlanFilesSelect}
+                    disabled={isFoundationPlanProcessing}
+                    title="Upload Foundation Plan PDFs"
+                    description="Click to browse or drag & drop PDF files here"
+                    iconColor="emerald"
+                    zoneId="foundation-plan-priority"
+                    isActiveTab={activeTab === 'priority'}
+                    accept=".pdf,application/pdf"
+                    allowPaste={false}
+                    fileTypesLabel="PDF only"
+                  />
+                  {foundationPlanResults.length > 0 && (
+                    <div className="mt-4">
+                      {renderFileList(foundationPlanResults, 'Foundation Plan Files')}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {foundationPriorityText.lines.length > 0 && (
+                <div className="space-y-6 animate-fade-in-up">
+                  <FoundationPriorityTextResult
+                    text={foundationPriorityText.text}
+                    count={foundationPriorityText.lines.length}
+                  />
+
+                  <div className="bg-cyan-50 border border-cyan-100 rounded-lg p-4 flex gap-3 text-sm text-cyan-700">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 flex-shrink-0 mt-0.5">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clipRule="evenodd" />
+                    </svg>
+                    <p>
+                      <strong>Rule:</strong> The app matches both PDFs by canonical X/Y placement tokens for each support location, such as `X1` or `X1-X2`.
+                      {' '}If 基礎伏図 shows an FC code at that placement, it wins. Otherwise the app uses the certified C or P code from 認定柱脚資料 at the same placement.
                     </p>
                   </div>
                 </div>

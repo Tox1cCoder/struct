@@ -1,5 +1,11 @@
-import { GoogleGenAI, Type } from "@google/genai";
-import { ColumnReinforcementData, FoundationColumnData, FrameData } from "../types";
+import { createPartFromUri, FileState, GoogleGenAI, PartMediaResolutionLevel, ThinkingLevel, Type } from "@google/genai";
+import { CertifiedCoordinateData, ColumnReinforcementData, FoundationColumnData, FoundationPlanCoordinateData, FrameData } from "../types";
+import {
+  normalizeCertifiedCoordinateRows,
+  normalizeFoundationPlanCoordinateRows,
+  summarizeRawCoordinateRows,
+} from "../utils/coordinateExtraction";
+import { logError } from "../utils/errorHandling";
 
 // User provided prompt text for Column Reinforcement extraction
 const REINFORCEMENT_SYSTEM_PROMPT = `
@@ -65,6 +71,154 @@ Analyze the provided image/PDF of the foundation plan and generate a structured 
     *   Sort the list alphanumerically by the Foundation label.
 
 **IMPORTANT:** Output a valid JSON array based on the schema provided.
+`;
+
+const FOUNDATION_PRIORITY_API_VERSION = 'v1alpha';
+const FOUNDATION_PRIORITY_MODEL = 'gemini-3.1-pro-preview';
+const FOUNDATION_PRIORITY_THINKING_LEVEL = ThinkingLevel.HIGH;
+const FOUNDATION_PRIORITY_PRIMARY_MEDIA_RESOLUTION = PartMediaResolutionLevel.MEDIA_RESOLUTION_MEDIUM;
+const FOUNDATION_PRIORITY_FALLBACK_MEDIA_RESOLUTION = PartMediaResolutionLevel.MEDIA_RESOLUTION_HIGH;
+const FOUNDATION_PRIORITY_TEMPERATURE = 0;
+const FOUNDATION_PRIORITY_TOP_P = 0.1;
+const FOUNDATION_PRIORITY_TOP_K = 1;
+const FOUNDATION_PRIORITY_CANDIDATE_COUNT = 1;
+const FOUNDATION_PRIORITY_SEED = 7;
+const FOUNDATION_PRIORITY_POLL_INTERVAL_MS = 1500;
+
+type ActiveGeminiPdfFile = {
+  name: string;
+  uri: string;
+  mimeType: string;
+};
+
+const CERTIFIED_FOUNDATION_COORDINATE_PROMPT = `
+You are reading one layer of a structural foundation drawing set: 認定柱脚資料.
+
+Your job is to extract the certified support code assigned to each grid placement.
+This PDF is one layer of the same design as 基礎伏図, so the placement key must identify the physical placement of each object.
+
+For EACH axis, output a canonical locator token:
+- If the object centerline is on a main grid line, use that line label, for example X1 or Y3.
+- If the object lies between two main grid lines, use a between-line token, for example X1-X2 or Y1-Y2.
+- If the drawing shows or implies a half-grid label like X1.5 or Y1.5, normalize it to X1-X2 or Y1-Y2.
+- Never collapse an off-grid object to the nearest main axis.
+
+Extraction rules:
+1. Find each certified support code that starts with "C" or "P", such as C3009, C3010, C12, P1.
+2. For each support code, identify its X-axis locator token and Y-axis locator token.
+3. The object or its label may be visually offset from the main grid crossing. Use the object center or centerline projection to determine whether each axis is on-line or between-lines.
+4. If the same support code appears in multiple placements, output one row for each placement.
+5. Preserve the exact certified code as shown in this PDF. Do not shorten C3009 to C1 and do not convert P1 to C1.
+6. Output one row per unique placement-code assignment.
+7. Ignore foundation labels that start with F in this PDF, if any exist.
+8. Remove whitespace and notes in parentheses from extracted values.
+9. If an axis locator cannot be read confidently, omit that row instead of guessing.
+
+Output a valid JSON array based on the provided schema.
+`;
+
+const CERTIFIED_FOUNDATION_COORDINATE_FALLBACK_PROMPT = `
+You are reading 認定柱脚資料, which is one layer of the same drawing as 基礎伏図.
+
+The previous extraction did not return usable rows. Re-read the PDF carefully and extract only rows where you can identify all three values:
+- one certified support code beginning with C or P
+- one X-axis locator token
+- one Y-axis locator token
+
+Canonical locator format:
+- on X1 -> xAxis = X1
+- between X1 and X2 -> xAxis = X1-X2
+- on Y3 -> yAxis = Y3
+- between Y1 and Y2 -> yAxis = Y1-Y2
+- if the drawing implies X1.5 or Y1.5, normalize it to X1-X2 or Y1-Y2
+
+Important reading rules:
+1. Search for placements in any of these forms: separate X and Y labels, combined strings, half-grid labels, or table cells that imply one X and one Y placement.
+2. If a row or callout contains a combined placement, split it into xAxis and yAxis using the canonical locator format above.
+3. The object or its label may be offset from the grid crossing. Use the object center or projected centerline to decide whether each axis is on-line or between-lines.
+4. Preserve the exact certified code such as C3009 or P1.
+5. Do not guess. Omit rows that do not have a readable full placement.
+6. Return every confident row you can find, even if there are only a few.
+
+Example output:
+[
+  { "xAxis": "X1", "yAxis": "Y1", "columnType": "C3009" },
+  { "xAxis": "X4", "yAxis": "Y6-Y7", "columnType": "P1" }
+]
+
+Output a valid JSON array based on the provided schema.
+`;
+
+const FOUNDATION_PLAN_COORDINATE_PROMPT = `
+You are reading one layer of the same structural foundation drawing set: 基礎伏図.
+
+Your job is to extract each foundation label together with its grid placement and any FC, C, or P code shown at that same support location.
+This PDF is one layer of the same design as 認定柱脚資料, so the placement key must identify the same physical placement that can be matched across both PDFs.
+
+For EACH axis, output a canonical locator token:
+- If the support object centerline is on a main grid line, use that line label, for example X1 or Y3.
+- If the support object lies between two main grid lines, use a between-line token, for example X1-X2 or Y1-Y2.
+- If the drawing shows or implies a half-grid label like X1.5 or Y1.5, normalize it to X1-X2 or Y1-Y2.
+- Never collapse an off-grid object to the nearest main axis.
+
+Extraction rules:
+1. Find each foundation label that starts with "F", such as F1, F11C, FK1, F659834.
+2. A single foundation can contain multiple support objects or support codes. If that happens, output multiple rows with the same foundation label.
+3. For each support object within a foundation, identify its X-axis locator token and Y-axis locator token.
+4. The foundation, support object, or label may be visually offset from the main grid crossing. Use the support object center or centerline projection to determine whether each axis is on-line or between-lines.
+5. Extract the code shown at that same support location into planColumnType:
+   - If an FC code is shown, preserve the exact FC code.
+   - If only a C or P code alias is shown, preserve it ONLY when the alias text is colored or the alias is surrounded by a colored highlight/background.
+   - If a C or P alias is plain monochrome or not highlighted, do not trust it. In that case return an empty string for planColumnType.
+   - If no code is visible, use an empty string.
+6. If both FC and C/P are visible for the same support location, choose the FC code.
+7. Preserve the exact foundation label as shown in the plan.
+8. Remove whitespace and notes in parentheses from extracted values.
+9. Also return isHighlighted:
+   - true if the chosen visible alias is colored or has a colored background/highlight
+   - false if the chosen visible alias is plain monochrome or if no alias is visible
+10. Also return highlightColor with a simple color name like YELLOW, CYAN, BLUE, GREEN, PINK, RED, or empty string if none.
+11. Output one row per unique support location. The same foundation label may appear multiple times.
+12. If an axis locator cannot be read confidently, omit that row instead of guessing.
+
+Output a valid JSON array based on the provided schema.
+`;
+
+const FOUNDATION_PLAN_COORDINATE_FALLBACK_PROMPT = `
+You are reading 基礎伏図, which is one layer of the same drawing as 認定柱脚資料.
+
+The previous extraction did not return usable rows. Re-read the PDF carefully and extract only rows where you can identify:
+- one foundation label beginning with F
+- one support location within that foundation
+- one X-axis locator token
+- one Y-axis locator token
+- an FC code if visible, otherwise a visible C or P code alias, otherwise an empty string
+- whether that visible alias is highlighted/colored
+- the highlight color name if present
+
+Important reading rules:
+1. Canonical locator format:
+   - on X1 -> xAxis = X1
+   - between X1 and X2 -> xAxis = X1-X2
+   - on Y3 -> yAxis = Y3
+   - between Y1 and Y2 -> yAxis = Y1-Y2
+   - if the drawing implies X1.5 or Y1.5, normalize it to X1-X2 or Y1-Y2
+2. Search for placements in any of these forms: separate X and Y labels, combined strings, half-grid labels, or table/callout combinations that clearly indicate one X and one Y placement.
+3. If one foundation contains multiple support objects, return multiple rows with the same foundation label.
+4. The foundation, support object, or label may be offset from the grid crossing. Use the support object center or projected centerline to decide whether each axis is on-line or between-lines.
+5. Prefer colored aliases in 基礎伏図. If a C or P alias is plain monochrome and not highlighted, set planColumnType to an empty string and set isHighlighted to false.
+6. If both FC and C/P appear for the same support location, choose FC.
+7. Preserve the exact foundation label such as F1, FK1, F659834.
+8. Do not guess. Omit rows that do not have a readable full placement.
+9. Return every confident row you can find, even if there are only a few.
+
+Example output:
+[
+  { "foundation": "F1", "xAxis": "X1", "yAxis": "Y1", "planColumnType": "FC1", "isHighlighted": true, "highlightColor": "YELLOW" },
+  { "foundation": "F1", "xAxis": "X1-X2", "yAxis": "Y2", "planColumnType": "", "isHighlighted": false, "highlightColor": "" }
+]
+
+Output a valid JSON array based on the provided schema.
 `;
 
 export const extractDataFromPdf = async (base64Data: string, mimeType: string): Promise<ColumnReinforcementData[]> => {
@@ -184,7 +338,7 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
     }));
 
   } catch (error) {
-    console.error("Gemini Extraction Error:", error);
+    logError("Gemini Extraction Error:", error);
     throw error;
   }
 };
@@ -253,9 +407,246 @@ export const extractFoundationColumnData = async (base64Data: string, mimeType: 
     }));
 
   } catch (error) {
-    console.error("Foundation-Column Extraction Error:", error);
+    logError("Foundation-Column Extraction Error:", error);
     throw error;
   }
+};
+
+const sleep = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
+
+const uploadPdfAndWaitUntilActive = async (ai: GoogleGenAI, file: File): Promise<ActiveGeminiPdfFile> => {
+  const uploadedFile = await ai.files.upload({
+    file,
+    config: {
+      mimeType: file.type || 'application/pdf',
+      displayName: file.name,
+    },
+  });
+
+  if (!uploadedFile.name) {
+    throw new Error('Gemini Files API did not return a file name.');
+  }
+
+  const fileName = uploadedFile.name;
+  let currentFile = uploadedFile;
+
+  while (currentFile.state === FileState.PROCESSING) {
+    await sleep(FOUNDATION_PRIORITY_POLL_INTERVAL_MS);
+    currentFile = await ai.files.get({ name: fileName });
+  }
+
+  if (currentFile.state !== FileState.ACTIVE || !currentFile.uri || !currentFile.mimeType) {
+    throw new Error(`Gemini file processing did not complete successfully. State: ${currentFile.state ?? 'UNKNOWN'}`);
+  }
+
+  return {
+    name: fileName,
+    uri: currentFile.uri,
+    mimeType: currentFile.mimeType,
+  };
+};
+
+const parseStructuredArrayResponse = (rawData: unknown): any[] => {
+  let normalizedRawData = rawData;
+
+  if (!Array.isArray(normalizedRawData)) {
+    if (typeof normalizedRawData === 'object' && normalizedRawData !== null) {
+      normalizedRawData = [normalizedRawData];
+    } else {
+      throw new Error(`Invalid response format - expected array, got ${typeof normalizedRawData}`);
+    }
+  }
+
+  return normalizedRawData as any[];
+};
+
+const certifiedCoordinateResponseSchema = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      xAxis: {
+        type: 'string',
+        description: 'The canonical X-axis locator token such as X1, X2A, X10, or X1-X2 when the object lies between lines'
+      },
+      yAxis: {
+        type: 'string',
+        description: 'The canonical Y-axis locator token such as Y1, Y2A, Y10, or Y1-Y2 when the object lies between lines'
+      },
+      columnType: {
+        type: 'string',
+        description: 'The exact certified C or P code such as C3009, C3010, C12, P1'
+      }
+    },
+    required: ['xAxis', 'yAxis', 'columnType'],
+    additionalProperties: false
+  }
+};
+
+const foundationPlanCoordinateResponseSchema = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      foundation: {
+        type: 'string',
+        description: 'The exact foundation label such as F1, F11C, FK1, F659834. The same foundation may appear in multiple rows.'
+      },
+      xAxis: {
+        type: 'string',
+        description: 'The canonical X-axis locator token such as X1, X2A, X10, or X1-X2 when the support lies between lines'
+      },
+      yAxis: {
+        type: 'string',
+        description: 'The canonical Y-axis locator token such as Y1, Y2A, Y10, or Y1-Y2 when the support lies between lines'
+      },
+      planColumnType: {
+        type: 'string',
+        description: 'The exact FC code if visible at this support location, otherwise the visible C or P alias, otherwise an empty string'
+      },
+      isHighlighted: {
+        type: 'boolean',
+        description: 'True if the chosen visible alias is colored or has a colored background/highlight. False for plain monochrome aliases or when no alias is visible.'
+      },
+      highlightColor: {
+        type: 'string',
+        description: 'Simple highlight color name such as YELLOW, CYAN, BLUE, GREEN, PINK, RED, or empty string if none'
+      }
+    },
+    required: ['foundation', 'xAxis', 'yAxis', 'planColumnType', 'isHighlighted', 'highlightColor'],
+    additionalProperties: false
+  }
+};
+
+const extractCoordinateDataFromPdf = async (
+  file: File,
+  prompt: string,
+  responseJsonSchema: object,
+  mediaResolution: PartMediaResolutionLevel,
+) => {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("VITE_GEMINI_API_KEY is not set");
+  }
+
+  const ai = new GoogleGenAI({
+    apiKey,
+    apiVersion: FOUNDATION_PRIORITY_API_VERSION,
+  });
+
+  try {
+    const uploadedFile = await uploadPdfAndWaitUntilActive(ai, file);
+
+    const response = await ai.models.generateContent({
+      model: FOUNDATION_PRIORITY_MODEL,
+      contents: [
+        prompt,
+        createPartFromUri(
+          uploadedFile.uri,
+          uploadedFile.mimeType,
+          mediaResolution,
+        ),
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseJsonSchema,
+        candidateCount: FOUNDATION_PRIORITY_CANDIDATE_COUNT,
+        temperature: FOUNDATION_PRIORITY_TEMPERATURE,
+        topP: FOUNDATION_PRIORITY_TOP_P,
+        topK: FOUNDATION_PRIORITY_TOP_K,
+        seed: FOUNDATION_PRIORITY_SEED,
+        thinkingConfig: {
+          thinkingLevel: FOUNDATION_PRIORITY_THINKING_LEVEL,
+        },
+      }
+    });
+
+    const jsonText = response.text;
+
+    if (!jsonText) {
+      throw new Error("No data returned from the model.");
+    }
+
+    return parseStructuredArrayResponse(JSON.parse(jsonText));
+  } catch (error) {
+    logError("Foundation Coordinate Extraction Error:", error);
+    throw error;
+  }
+};
+
+export const extractCertifiedCoordinateData = async (file: File): Promise<CertifiedCoordinateData[]> => {
+  const rawData = await extractCoordinateDataFromPdf(
+    file,
+    CERTIFIED_FOUNDATION_COORDINATE_PROMPT,
+    certifiedCoordinateResponseSchema,
+    FOUNDATION_PRIORITY_PRIMARY_MEDIA_RESOLUTION,
+  );
+
+  let validatedData = normalizeCertifiedCoordinateRows(rawData);
+
+  if (validatedData.length === 0) {
+    logError(
+      `Certified coordinate extraction returned unusable rows for ${file.name}. Primary raw sample:`,
+      summarizeRawCoordinateRows(rawData),
+    );
+
+    const fallbackRawData = await extractCoordinateDataFromPdf(
+      file,
+      CERTIFIED_FOUNDATION_COORDINATE_FALLBACK_PROMPT,
+      certifiedCoordinateResponseSchema,
+      FOUNDATION_PRIORITY_FALLBACK_MEDIA_RESOLUTION,
+    );
+
+    validatedData = normalizeCertifiedCoordinateRows(fallbackRawData);
+
+    if (validatedData.length === 0) {
+      logError(
+        `Certified coordinate extraction still returned unusable rows for ${file.name}. Fallback raw sample:`,
+        summarizeRawCoordinateRows(fallbackRawData),
+      );
+      throw new Error('No valid certified coordinate data found in response. Gemini returned rows, but none contained a readable governing X/Y coordinate and certified C/P code.');
+    }
+  }
+
+  return validatedData;
+};
+
+export const extractFoundationPlanCoordinateData = async (file: File): Promise<FoundationPlanCoordinateData[]> => {
+  const rawData = await extractCoordinateDataFromPdf(
+    file,
+    FOUNDATION_PLAN_COORDINATE_PROMPT,
+    foundationPlanCoordinateResponseSchema,
+    FOUNDATION_PRIORITY_PRIMARY_MEDIA_RESOLUTION,
+  );
+
+  let validatedData = normalizeFoundationPlanCoordinateRows(rawData);
+
+  if (validatedData.length === 0) {
+    logError(
+      `Foundation plan extraction returned unusable rows for ${file.name}. Primary raw sample:`,
+      summarizeRawCoordinateRows(rawData),
+    );
+
+    const fallbackRawData = await extractCoordinateDataFromPdf(
+      file,
+      FOUNDATION_PLAN_COORDINATE_FALLBACK_PROMPT,
+      foundationPlanCoordinateResponseSchema,
+      FOUNDATION_PRIORITY_FALLBACK_MEDIA_RESOLUTION,
+    );
+
+    validatedData = normalizeFoundationPlanCoordinateRows(fallbackRawData);
+
+    if (validatedData.length === 0) {
+      logError(
+        `Foundation plan extraction still returned unusable rows for ${file.name}. Fallback raw sample:`,
+        summarizeRawCoordinateRows(fallbackRawData),
+      );
+      throw new Error('No valid foundation plan coordinate data found in response. Gemini returned rows, but none contained a readable foundation label with a governing X/Y coordinate.');
+    }
+  }
+
+  return validatedData;
 };
 
 // Frame extraction prompt (FW and FG types)
@@ -449,7 +840,7 @@ export const extractFrameData = async (base64Data: string, mimeType: string): Pr
     }));
 
   } catch (error) {
-    console.error("Frame Extraction Error:", error);
+    logError("Frame Extraction Error:", error);
     throw error;
   }
 };
