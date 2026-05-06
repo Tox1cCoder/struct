@@ -1,18 +1,32 @@
-export interface CertifiedCoordinateRow {
+export interface CoordinateSource {
+  sourceFileId?: string;
+  page?: number;
+  bbox?: { ymin: number; xmin: number; ymax: number; xmax: number };
+}
+
+export interface CertifiedCoordinateRow extends CoordinateSource {
   xAxis: string;
   yAxis: string;
   columnType: string;
 }
 
-export interface FoundationPlanCoordinateRow {
+export interface FoundationPlanCoordinateRow extends CoordinateSource {
   foundation: string;
   xAxis: string;
   yAxis: string;
   planColumnType: string;
 }
 
+export interface FoundationPriorityEntry extends CoordinateSource {
+  foundation: string;
+  columnType: string;
+  text: string;
+  origin: 'plan' | 'certified';
+}
+
 export interface FoundationPriorityTextResult {
   lines: string[];
+  entries: FoundationPriorityEntry[];
   text: string;
 }
 
@@ -40,7 +54,14 @@ const normalizeCertifiedRow = (row: CertifiedCoordinateRow): CertifiedCoordinate
     return null;
   }
 
-  return { xAxis, yAxis, columnType };
+  return {
+    xAxis,
+    yAxis,
+    columnType,
+    sourceFileId: row.sourceFileId,
+    page: row.page,
+    bbox: row.bbox,
+  };
 };
 
 const normalizeFoundationPlanRow = (row: FoundationPlanCoordinateRow): FoundationPlanCoordinateRow | null => {
@@ -53,14 +74,22 @@ const normalizeFoundationPlanRow = (row: FoundationPlanCoordinateRow): Foundatio
     return null;
   }
 
-  return { foundation, xAxis, yAxis, planColumnType };
+  return {
+    foundation,
+    xAxis,
+    yAxis,
+    planColumnType,
+    sourceFileId: row.sourceFileId,
+    page: row.page,
+    bbox: row.bbox,
+  };
 };
 
 export const buildFoundationPriorityText = (
   certifiedRows: CertifiedCoordinateRow[],
   foundationPlanRows: FoundationPlanCoordinateRow[],
 ): FoundationPriorityTextResult => {
-  const certifiedByCoordinate = new Map<string, string>();
+  const certifiedByCoordinate = new Map<string, CertifiedCoordinateRow>();
 
   for (const row of certifiedRows) {
     const normalizedRow = normalizeCertifiedRow(row);
@@ -71,11 +100,27 @@ export const buildFoundationPriorityText = (
 
     const key = toCoordinateKey(normalizedRow.xAxis, normalizedRow.yAxis);
     if (!certifiedByCoordinate.has(key)) {
-      certifiedByCoordinate.set(key, normalizedRow.columnType);
+      certifiedByCoordinate.set(key, normalizedRow);
     }
   }
 
-  const foundationToColumns = new Map<string, Set<string>>();
+  type ResolvedCode = {
+    columnType: string;
+    origin: 'plan' | 'certified';
+    sourceFileId?: string;
+    page?: number;
+    bbox?: CoordinateSource['bbox'];
+  };
+
+  const foundationToCodes = new Map<string, Map<string, ResolvedCode>>();
+
+  const addCode = (foundation: string, code: ResolvedCode) => {
+    const existing = foundationToCodes.get(foundation) ?? new Map<string, ResolvedCode>();
+    if (!existing.has(code.columnType)) {
+      existing.set(code.columnType, code);
+    }
+    foundationToCodes.set(foundation, existing);
+  };
 
   for (const row of foundationPlanRows) {
     const normalizedRow = normalizeFoundationPlanRow(row);
@@ -84,33 +129,54 @@ export const buildFoundationPriorityText = (
       continue;
     }
 
-    const resolvedCodes = foundationToColumns.get(normalizedRow.foundation) ?? new Set<string>();
-
     if (isValidColumnCode(normalizedRow.planColumnType) && isFcCode(normalizedRow.planColumnType)) {
-      resolvedCodes.add(normalizedRow.planColumnType);
-      foundationToColumns.set(normalizedRow.foundation, resolvedCodes);
+      addCode(normalizedRow.foundation, {
+        columnType: normalizedRow.planColumnType,
+        origin: 'plan',
+        sourceFileId: normalizedRow.sourceFileId,
+        page: normalizedRow.page,
+        bbox: normalizedRow.bbox,
+      });
       continue;
     }
 
     const key = toCoordinateKey(normalizedRow.xAxis, normalizedRow.yAxis);
-    const certifiedColumnType = certifiedByCoordinate.get(key);
+    const certifiedRow = certifiedByCoordinate.get(key);
 
-    if (certifiedColumnType) {
-      resolvedCodes.add(certifiedColumnType);
-      foundationToColumns.set(normalizedRow.foundation, resolvedCodes);
+    if (certifiedRow) {
+      addCode(normalizedRow.foundation, {
+        columnType: certifiedRow.columnType,
+        origin: 'certified',
+        sourceFileId: certifiedRow.sourceFileId,
+        page: certifiedRow.page,
+        bbox: certifiedRow.bbox,
+      });
     }
   }
 
-  const lines = [...foundationToColumns.entries()]
-    .sort(([leftFoundation], [rightFoundation]) => naturalCompare(leftFoundation, rightFoundation))
-    .flatMap(([foundation, columnTypes]) =>
-      [...columnTypes]
-        .sort((leftColumnType, rightColumnType) => naturalCompare(leftColumnType, rightColumnType))
-        .map((columnType) => `${foundation}: ${columnType}`),
-    );
+  const sortedFoundations = [...foundationToCodes.entries()].sort(([leftFoundation], [rightFoundation]) =>
+    naturalCompare(leftFoundation, rightFoundation),
+  );
+
+  const entries: FoundationPriorityEntry[] = sortedFoundations.flatMap(([foundation, codes]) => {
+    return [...codes.values()]
+      .sort((left, right) => naturalCompare(left.columnType, right.columnType))
+      .map((code) => ({
+        foundation,
+        columnType: code.columnType,
+        origin: code.origin,
+        text: `${foundation}: ${code.columnType}`,
+        sourceFileId: code.sourceFileId,
+        page: code.page,
+        bbox: code.bbox,
+      }));
+  });
+
+  const lines = entries.map((entry) => entry.text);
 
   return {
     lines,
+    entries,
     text: lines.join('\n'),
   };
 };

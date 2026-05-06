@@ -1,11 +1,53 @@
 import { createPartFromUri, FileState, GoogleGenAI, PartMediaResolutionLevel, ThinkingLevel, Type } from "@google/genai";
 import { CertifiedCoordinateData, ColumnReinforcementData, FoundationColumnData, FoundationPlanCoordinateData, FrameData } from "../types";
+import { parseBoundingBox, parsePage } from "../utils/boundingBox";
 import {
   normalizeCertifiedCoordinateRows,
   normalizeFoundationPlanCoordinateRows,
   summarizeRawCoordinateRows,
 } from "../utils/coordinateExtraction";
 import { logError } from "../utils/errorHandling";
+
+const SPATIAL_INSTRUCTION_PDF = `
+
+**Spatial output (REQUIRED for verification):**
+For each extracted item, also return:
+- "page": the 1-indexed page number where the data appears in the PDF.
+- "bbox": an object {"ymin": number, "xmin": number, "ymax": number, "xmax": number} giving normalized 0-1000 coordinates of the rectangle that tightly bounds the extracted data on that page. Use the standard top-left origin convention: ymin/xmin is the upper-left corner, ymax/xmax is the lower-right corner.
+
+If you cannot localize an item confidently on a specific page, omit "bbox" rather than guessing. Always include "page" when you can identify the source page.
+`;
+
+const SPATIAL_INSTRUCTION_IMAGE = `
+
+**Spatial output (REQUIRED for verification):**
+For each extracted item, also return "bbox": an object {"ymin": number, "xmin": number, "ymax": number, "xmax": number} giving normalized 0-1000 coordinates of the rectangle that tightly bounds the extracted data within the image. Use top-left origin (ymin/xmin = upper-left, ymax/xmax = lower-right).
+
+If you cannot localize an item confidently, omit "bbox" rather than guessing.
+`;
+
+const bboxSchemaTyped = {
+  type: Type.OBJECT,
+  properties: {
+    ymin: { type: Type.NUMBER, description: 'Top edge, 0-1000 normalized' },
+    xmin: { type: Type.NUMBER, description: 'Left edge, 0-1000 normalized' },
+    ymax: { type: Type.NUMBER, description: 'Bottom edge, 0-1000 normalized' },
+    xmax: { type: Type.NUMBER, description: 'Right edge, 0-1000 normalized' },
+  },
+  required: ['ymin', 'xmin', 'ymax', 'xmax'],
+};
+
+const bboxSchemaJson = {
+  type: 'object',
+  properties: {
+    ymin: { type: 'number', description: 'Top edge, 0-1000 normalized' },
+    xmin: { type: 'number', description: 'Left edge, 0-1000 normalized' },
+    ymax: { type: 'number', description: 'Bottom edge, 0-1000 normalized' },
+    xmax: { type: 'number', description: 'Right edge, 0-1000 normalized' },
+  },
+  required: ['ymin', 'xmin', 'ymax', 'xmax'],
+  additionalProperties: false,
+};
 
 // User provided prompt text for Column Reinforcement extraction
 const REINFORCEMENT_SYSTEM_PROMPT = `
@@ -113,7 +155,7 @@ Extraction rules:
 7. Ignore foundation labels that start with F in this PDF, if any exist.
 8. Remove whitespace and notes in parentheses from extracted values.
 9. If an axis locator cannot be read confidently, omit that row instead of guessing.
-
+${SPATIAL_INSTRUCTION_PDF}
 Output a valid JSON array based on the provided schema.
 `;
 
@@ -142,10 +184,10 @@ Important reading rules:
 
 Example output:
 [
-  { "xAxis": "X1", "yAxis": "Y1", "columnType": "C3009" },
-  { "xAxis": "X4", "yAxis": "Y6-Y7", "columnType": "P1" }
+  { "xAxis": "X1", "yAxis": "Y1", "columnType": "C3009", "page": 1, "bbox": { "ymin": 410, "xmin": 220, "ymax": 470, "xmax": 290 } },
+  { "xAxis": "X4", "yAxis": "Y6-Y7", "columnType": "P1", "page": 2 }
 ]
-
+${SPATIAL_INSTRUCTION_PDF}
 Output a valid JSON array based on the provided schema.
 `;
 
@@ -180,7 +222,7 @@ Extraction rules:
 10. Also return highlightColor with a simple color name like YELLOW, CYAN, BLUE, GREEN, PINK, RED, or empty string if none.
 11. Output one row per unique support location. The same foundation label may appear multiple times.
 12. If an axis locator cannot be read confidently, omit that row instead of guessing.
-
+${SPATIAL_INSTRUCTION_PDF}
 Output a valid JSON array based on the provided schema.
 `;
 
@@ -214,10 +256,10 @@ Important reading rules:
 
 Example output:
 [
-  { "foundation": "F1", "xAxis": "X1", "yAxis": "Y1", "planColumnType": "FC1", "isHighlighted": true, "highlightColor": "YELLOW" },
-  { "foundation": "F1", "xAxis": "X1-X2", "yAxis": "Y2", "planColumnType": "", "isHighlighted": false, "highlightColor": "" }
+  { "foundation": "F1", "xAxis": "X1", "yAxis": "Y1", "planColumnType": "FC1", "isHighlighted": true, "highlightColor": "YELLOW", "page": 1, "bbox": { "ymin": 220, "xmin": 410, "ymax": 280, "xmax": 480 } },
+  { "foundation": "F1", "xAxis": "X1-X2", "yAxis": "Y2", "planColumnType": "", "isHighlighted": false, "highlightColor": "", "page": 1 }
 ]
-
+${SPATIAL_INSTRUCTION_PDF}
 Output a valid JSON array based on the provided schema.
 `;
 
@@ -238,8 +280,9 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
     *   Example: "D13@100 (SD295)" should become "D13@100".
 
     **IMPORTANT OVERRIDE:**
-    Ignore the "Output Format" instruction in the text above regarding Markdown. 
+    Ignore the "Output Format" instruction in the text above regarding Markdown.
     Instead, strictly output a valid JSON array based on the schema provided.
+    ${mimeType === 'application/pdf' ? SPATIAL_INSTRUCTION_PDF : SPATIAL_INSTRUCTION_IMAGE}
   `;
 
   try {
@@ -280,7 +323,12 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
               hoopReinforcement: {
                 type: Type.STRING,
                 description: "Extracted value for '帯筋' (Hoop Bar). Omit material grade like (SD295)."
-              }
+              },
+              page: {
+                type: Type.NUMBER,
+                description: '1-indexed PDF page number where the data was found. Omit for single-image inputs.'
+              },
+              bbox: bboxSchemaTyped,
             },
             required: ['columnType', 'columnDimensions', 'mainReinforcement', 'hoopReinforcement']
           }
@@ -331,10 +379,13 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
     // Regex: Match a space (optional) followed by ( or （, any content, then ) or ）
     const cleanValue = (val: string) => val?.replace(/\s*[\(（].*?[\)）]/g, '').trim() || '';
 
-    return validatedData.map((item: ColumnReinforcementData) => ({
-      ...item,
+    return validatedData.map((item: any): ColumnReinforcementData => ({
+      columnType: item.columnType,
+      columnDimensions: item.columnDimensions,
       mainReinforcement: cleanValue(item.mainReinforcement),
       hoopReinforcement: cleanValue(item.hoopReinforcement),
+      page: parsePage(item.page),
+      bbox: parseBoundingBox(item.bbox),
     }));
 
   } catch (error) {
@@ -476,7 +527,12 @@ const certifiedCoordinateResponseSchema = {
       columnType: {
         type: 'string',
         description: 'The exact certified C or P code such as C3009, C3010, C12, P1'
-      }
+      },
+      page: {
+        type: 'number',
+        description: '1-indexed page number in the PDF where this support code appears.'
+      },
+      bbox: bboxSchemaJson,
     },
     required: ['xAxis', 'yAxis', 'columnType'],
     additionalProperties: false
@@ -511,7 +567,12 @@ const foundationPlanCoordinateResponseSchema = {
       highlightColor: {
         type: 'string',
         description: 'Simple highlight color name such as YELLOW, CYAN, BLUE, GREEN, PINK, RED, or empty string if none'
-      }
+      },
+      page: {
+        type: 'number',
+        description: '1-indexed page number in the PDF where this support location appears.'
+      },
+      bbox: bboxSchemaJson,
     },
     required: ['foundation', 'xAxis', 'yAxis', 'planColumnType', 'isHighlighted', 'highlightColor'],
     additionalProperties: false
@@ -711,7 +772,7 @@ These images show a table format with:
 4. **For each unique frame name (符号), output ONLY ONE entry. Multiple columns with different 位置 but same 符号 should be treated as ONE frame.**
 
 5. **Remove any material specifications in parentheses like (SD345) or (SD295).**
-
+${SPATIAL_INSTRUCTION_IMAGE}
 **Output a valid JSON array based on the schema provided.**
 `;
 
@@ -782,7 +843,8 @@ export const extractFrameData = async (base64Data: string, mimeType: string): Pr
               stirrupValue: {
                 type: Type.STRING,
                 description: "St. spacing value (e.g., '100') - FG only, empty string for FW"
-              }
+              },
+              bbox: bboxSchemaTyped,
             },
             required: ['frameName', 'b', 'h', 'topRebarD', 'topRebarValue', 'bottomRebarD', 'bottomRebarValue', 'stirrupD', 'stirrupValue']
           }
@@ -833,10 +895,17 @@ export const extractFrameData = async (base64Data: string, mimeType: string): Pr
     // Post-processing: Clean any remaining parentheses content
     const cleanValue = (val: string) => val?.replace(/\s*[\(（].*?[\)）]/g, '').trim() || '';
 
-    return validatedData.map((item: FrameData) => ({
-      ...item,
+    return validatedData.map((item: any): FrameData => ({
+      frameName: item.frameName,
+      b: item.b,
+      h: item.h,
       topRebarD: cleanValue(item.topRebarD),
+      topRebarValue: item.topRebarValue,
       bottomRebarD: cleanValue(item.bottomRebarD),
+      bottomRebarValue: item.bottomRebarValue,
+      stirrupD: item.stirrupD,
+      stirrupValue: item.stirrupValue,
+      bbox: parseBoundingBox(item.bbox),
     }));
 
   } catch (error) {

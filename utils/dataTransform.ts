@@ -74,6 +74,9 @@ export function transformForExport(data: ColumnReinforcementData[]): ExpandedRei
         mainReinforcementSize: mainReinf.size,
         hoopReinforcementSize: hoopReinf.size,
         hoopReinforcementSpacing: hoopReinf.spacing,
+        sourceFileId: item.sourceFileId,
+        page: item.page,
+        bbox: item.bbox,
       });
     }
   }

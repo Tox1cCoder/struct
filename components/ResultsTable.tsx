@@ -1,13 +1,29 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { ExpandedReinforcementData } from '../types';
+import { BoundingBox, ExpandedReinforcementData } from '../types';
+
+interface RowSource {
+  fileId: string;
+  page?: number;
+  bbox?: BoundingBox;
+}
 
 interface ResultsTableProps {
   data: ExpandedReinforcementData[];
   hasFoundationData?: boolean;
+  selectedRowKey?: string | null;
+  onRowSelect?: (rowKey: string, source: RowSource | null) => void;
 }
 
-export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationData = false }) => {
+const rowKeyOf = (row: ExpandedReinforcementData, index: number) =>
+  `${row.foundation ?? ''}::${row.columnType}::${index}`;
+
+export const ResultsTable: React.FC<ResultsTableProps> = ({
+  data,
+  hasFoundationData = false,
+  selectedRowKey,
+  onRowSelect,
+}) => {
   const [exporting, setExporting] = useState(false);
 
   if (data.length === 0) {
@@ -18,13 +34,11 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
     );
   }
 
-  // Whether any row has B/H column data
   const hasBHData = data.some(row => row.bColumn || row.hColumn);
 
   const handleExportExcel = () => {
     setExporting(true);
     try {
-      // Build headers dynamically
       const headers: string[] = [];
       if (hasFoundationData) headers.push('Foundation (基礎)');
       headers.push('Column Type (柱符号)');
@@ -41,7 +55,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
         headers.push('柱_ly');
       }
 
-      // Build row data
       const rows = data.map(row => {
         const cells: string[] = [];
         if (hasFoundationData) cells.push(row.foundation || '');
@@ -66,7 +79,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(wsData);
 
-      // Set column widths
       const colWidths: { wch: number }[] = [];
       if (hasFoundationData) colWidths.push({ wch: 12 });
       colWidths.push({ wch: 15 });
@@ -93,6 +105,20 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
     } finally {
       setExporting(false);
     }
+  };
+
+  const handleRowClick = (row: ExpandedReinforcementData, index: number) => {
+    if (!onRowSelect) return;
+    const key = rowKeyOf(row, index);
+    if (!row.sourceFileId) {
+      onRowSelect(key, null);
+      return;
+    }
+    onRowSelect(key, {
+      fileId: row.sourceFileId,
+      page: row.page,
+      bbox: row.bbox,
+    });
   };
 
   return (
@@ -156,51 +182,53 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data, hasFoundationD
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {data.map((row, index) => (
-              <tr
-                key={`${row.foundation}-${row.columnType}-${index}`}
-                className="hover:bg-gray-50 transition-colors duration-150"
-              >
-                {hasFoundationData && (
-                  <td className="px-4 py-3 text-sm font-semibold text-emerald-700">
-                    {row.foundation || '-'}
+            {data.map((row, index) => {
+              const key = rowKeyOf(row, index);
+              const isSelected = key === selectedRowKey;
+              const clickable = Boolean(onRowSelect && row.sourceFileId);
+              return (
+                <tr
+                  key={key}
+                  onClick={() => handleRowClick(row, index)}
+                  className={`transition-colors duration-150 ${
+                    isSelected
+                      ? 'bg-indigo-50 ring-1 ring-inset ring-indigo-300'
+                      : 'hover:bg-gray-50'
+                  } ${clickable ? 'cursor-pointer' : ''}`}
+                >
+                  {hasFoundationData && (
+                    <td className={`px-4 py-3 text-sm font-semibold text-emerald-700 ${isSelected ? 'border-l-[3px] border-l-indigo-500' : ''}`}>
+                      {row.foundation || '-'}
+                    </td>
+                  )}
+                  <td className={`px-4 py-3 text-sm font-bold text-gray-900 ${isSelected && !hasFoundationData ? 'border-l-[3px] border-l-indigo-500' : ''}`}>
+                    {row.columnType}
+                    {row.bbox && (
+                      <span className="ml-2 inline-block h-1.5 w-1.5 rounded-full bg-indigo-400" title="Source bounding box available" />
+                    )}
                   </td>
-                )}
-                <td className="px-4 py-3 text-sm font-bold text-gray-900">
-                  {row.columnType}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
-                  {row.dimensionWidth}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
-                  {row.dimensionHeight}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
-                  {row.mainReinforcementCount}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
-                  {row.mainReinforcementSize}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
-                  {row.hoopReinforcementSize}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
-                  {row.hoopReinforcementSpacing}
-                </td>
-                {hasBHData && (
-                  <>
-                    <td className="px-4 py-3 text-sm text-indigo-700 font-mono">
-                      {row.bColumn || ''}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-indigo-700 font-mono">
-                      {row.hColumn || ''}
-                    </td>
-                  </>
-                )}
-              </tr>
-            ))}
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.dimensionWidth}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.dimensionHeight}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.mainReinforcementCount}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.mainReinforcementSize}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.hoopReinforcementSize}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.hoopReinforcementSpacing}</td>
+                  {hasBHData && (
+                    <>
+                      <td className="px-4 py-3 text-sm text-indigo-700 font-mono">{row.bColumn || ''}</td>
+                      <td className="px-4 py-3 text-sm text-indigo-700 font-mono">{row.hColumn || ''}</td>
+                    </>
+                  )}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        {onRowSelect && (
+          <div className="border-t border-gray-100 bg-gray-50 px-4 py-2 text-[11px] text-gray-500">
+            Tip: click any row to highlight its source region in the viewer.
+          </div>
+        )}
       </div>
     </div>
   );

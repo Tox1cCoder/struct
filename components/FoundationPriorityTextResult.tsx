@@ -1,11 +1,29 @@
 import React, { useState } from 'react';
+import { BoundingBox } from '../types';
+import { FoundationPriorityEntry } from '../utils/mergeFoundationPriority';
+
+interface RowSource {
+  fileId: string;
+  page?: number;
+  bbox?: BoundingBox;
+}
 
 interface FoundationPriorityTextResultProps {
   text: string;
-  count: number;
+  entries: FoundationPriorityEntry[];
+  selectedRowKey?: string | null;
+  onRowSelect?: (rowKey: string, source: RowSource | null) => void;
 }
 
-export const FoundationPriorityTextResult: React.FC<FoundationPriorityTextResultProps> = ({ text, count }) => {
+const rowKeyOf = (entry: FoundationPriorityEntry, index: number) =>
+  `${entry.foundation}::${entry.columnType}::${index}`;
+
+export const FoundationPriorityTextResult: React.FC<FoundationPriorityTextResultProps> = ({
+  text,
+  entries,
+  selectedRowKey,
+  onRowSelect,
+}) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -18,13 +36,27 @@ export const FoundationPriorityTextResult: React.FC<FoundationPriorityTextResult
     }
   };
 
+  const handleRowClick = (entry: FoundationPriorityEntry, index: number) => {
+    if (!onRowSelect) return;
+    const key = rowKeyOf(entry, index);
+    if (!entry.sourceFileId) {
+      onRowSelect(key, null);
+      return;
+    }
+    onRowSelect(key, {
+      fileId: entry.sourceFileId,
+      page: entry.page,
+      bbox: entry.bbox,
+    });
+  };
+
   return (
     <div className="w-full mx-auto bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
       <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center flex-wrap gap-2">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold text-gray-800">Foundation Priority Text</h2>
           <span className="text-xs font-medium px-2.5 py-0.5 rounded bg-cyan-100 text-cyan-800">
-            {count} {count === 1 ? 'Foundation' : 'Foundations'}
+            {entries.length} {entries.length === 1 ? 'Foundation' : 'Foundations'}
           </span>
         </div>
         <button
@@ -50,10 +82,46 @@ export const FoundationPriorityTextResult: React.FC<FoundationPriorityTextResult
           )}
         </button>
       </div>
-      <div className="p-6">
-        <pre className="rounded-lg border border-cyan-100 bg-cyan-50/40 p-4 text-sm leading-6 text-gray-800 whitespace-pre-wrap break-words font-mono">
-          {text}
-        </pre>
+      <div className="p-3">
+        <div className="rounded-lg border border-cyan-100 bg-cyan-50/40 divide-y divide-cyan-100">
+          {entries.map((entry, index) => {
+            const key = rowKeyOf(entry, index);
+            const isSelected = key === selectedRowKey;
+            const clickable = Boolean(onRowSelect && entry.sourceFileId);
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => handleRowClick(entry, index)}
+                disabled={!clickable}
+                className={`flex w-full items-center justify-between gap-3 px-4 py-2 text-left transition ${
+                  isSelected
+                    ? 'bg-cyan-100/70 ring-1 ring-inset ring-cyan-400'
+                    : clickable
+                      ? 'hover:bg-cyan-100/40'
+                      : 'cursor-default'
+                } ${isSelected ? 'border-l-[3px] border-l-cyan-500' : ''}`}
+              >
+                <span className="font-mono text-sm text-gray-800">{entry.text}</span>
+                <span className="flex items-center gap-2 text-[10px] uppercase tracking-wide">
+                  <span className={`rounded px-1.5 py-0.5 font-semibold ${
+                    entry.origin === 'plan' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'
+                  }`}>
+                    {entry.origin === 'plan' ? '基礎伏図' : '認定柱脚'}
+                  </span>
+                  {entry.bbox && (
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-cyan-500" title="Source bounding box available" />
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {onRowSelect && (
+          <p className="mt-2 px-1 text-[11px] text-gray-500">
+            Tip: click any line to highlight its source region in the viewer.
+          </p>
+        )}
       </div>
     </div>
   );

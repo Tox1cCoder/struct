@@ -1,12 +1,21 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { FrameData } from '../types';
+import { BoundingBox, FrameData } from '../types';
+
+interface RowSource {
+  fileId: string;
+  bbox?: BoundingBox;
+}
 
 interface FrameResultsTableProps {
   data: FrameData[];
+  selectedRowKey?: string | null;
+  onRowSelect?: (rowKey: string, source: RowSource | null) => void;
 }
 
-export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data }) => {
+const rowKeyOf = (row: FrameData, index: number) => `${row.sourceFileId ?? ''}::${row.frameName}::${index}`;
+
+export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data, selectedRowKey, onRowSelect }) => {
   const [exporting, setExporting] = useState(false);
 
   if (data.length === 0) {
@@ -46,28 +55,36 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data }) =>
       const ws = XLSX.utils.aoa_to_sheet(wsData);
 
       ws['!cols'] = [
-        { wch: 15 }, // Frame Name
-        { wch: 8 },  // B
-        { wch: 8 },  // H
-        { wch: 10 }, // 上端筋 D
-        { wch: 10 }, // 上端筋 Value
-        { wch: 10 }, // 下端筋 D
-        { wch: 10 }, // 下端筋 Value
-        { wch: 10 }, // St. D
-        { wch: 10 }, // St. Value
+        { wch: 15 },
+        { wch: 8 },
+        { wch: 8 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 10 },
       ];
 
       XLSX.utils.book_append_sheet(wb, ws, 'Frame Data');
 
       const timestamp = new Date().toISOString().slice(0, 10);
-      const filename = `frame_data_${timestamp}.xlsx`;
-
-      XLSX.writeFile(wb, filename);
+      XLSX.writeFile(wb, `frame_data_${timestamp}.xlsx`);
     } catch (error) {
       console.error('Export failed:', error);
     } finally {
       setExporting(false);
     }
+  };
+
+  const handleRowClick = (row: FrameData, index: number) => {
+    if (!onRowSelect) return;
+    const key = rowKeyOf(row, index);
+    if (!row.sourceFileId) {
+      onRowSelect(key, null);
+      return;
+    }
+    onRowSelect(key, { fileId: row.sourceFileId, bbox: row.bbox });
   };
 
   return (
@@ -127,47 +144,47 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data }) =>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {data.map((row, index) => (
-              <tr
-                key={`${row.frameName}-${index}`}
-                className="hover:bg-gray-50 transition-colors duration-150"
-              >
-                <td className="px-4 py-3 text-sm font-bold text-gray-900">
-                  <span className={`inline-flex items-center gap-1 ${row.frameName.startsWith('FW') ? 'text-blue-700' : 'text-purple-700'}`}>
-                    {row.frameName}
-                    <span className={`text-[10px] px-1 py-0.5 rounded ${row.frameName.startsWith('FW') ? 'bg-blue-100' : 'bg-purple-100'}`}>
-                      {row.frameName.startsWith('FW') ? 'Wall' : 'Girder'}
+            {data.map((row, index) => {
+              const key = rowKeyOf(row, index);
+              const isSelected = key === selectedRowKey;
+              const clickable = Boolean(onRowSelect && row.sourceFileId);
+              return (
+                <tr
+                  key={key}
+                  onClick={() => handleRowClick(row, index)}
+                  className={`transition-colors duration-150 ${
+                    isSelected ? 'bg-amber-50 ring-1 ring-inset ring-amber-300' : 'hover:bg-gray-50'
+                  } ${clickable ? 'cursor-pointer' : ''}`}
+                >
+                  <td className={`px-4 py-3 text-sm font-bold text-gray-900 ${isSelected ? 'border-l-[3px] border-l-amber-500' : ''}`}>
+                    <span className={`inline-flex items-center gap-1 ${row.frameName.startsWith('FW') ? 'text-blue-700' : 'text-purple-700'}`}>
+                      {row.frameName}
+                      <span className={`text-[10px] px-1 py-0.5 rounded ${row.frameName.startsWith('FW') ? 'bg-blue-100' : 'bg-purple-100'}`}>
+                        {row.frameName.startsWith('FW') ? 'Wall' : 'Girder'}
+                      </span>
+                      {row.bbox && (
+                        <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-500" title="Source bounding box available" />
+                      )}
                     </span>
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
-                  {row.b}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 font-mono">
-                  {row.h}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 bg-amber-50/30 font-mono">
-                  {row.topRebarD}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 bg-amber-50/30 font-mono">
-                  {row.topRebarValue}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 bg-orange-50/30 font-mono">
-                  {row.bottomRebarD}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 bg-orange-50/30 font-mono">
-                  {row.bottomRebarValue}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 bg-blue-50/30 font-mono">
-                  {row.stirrupD || '-'}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700 bg-blue-50/30 font-mono">
-                  {row.stirrupValue || '-'}
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.b}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.h}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 bg-amber-50/30 font-mono">{row.topRebarD}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 bg-amber-50/30 font-mono">{row.topRebarValue}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 bg-orange-50/30 font-mono">{row.bottomRebarD}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 bg-orange-50/30 font-mono">{row.bottomRebarValue}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 bg-blue-50/30 font-mono">{row.stirrupD || '-'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 bg-blue-50/30 font-mono">{row.stirrupValue || '-'}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        {onRowSelect && (
+          <div className="border-t border-gray-100 bg-gray-50 px-4 py-2 text-[11px] text-gray-500">
+            Tip: click any row to highlight its source region in the viewer.
+          </div>
+        )}
       </div>
     </div>
   );

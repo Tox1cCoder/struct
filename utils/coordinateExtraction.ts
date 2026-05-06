@@ -1,4 +1,5 @@
 import { CertifiedCoordinateData, FoundationPlanCoordinateData } from '../types';
+import { parseBoundingBox, parsePage } from './boundingBox';
 
 const cleanLabel = (value: unknown) =>
   typeof value === 'string'
@@ -172,7 +173,16 @@ export const normalizeCertifiedCoordinateRows = (rawData: unknown[]): CertifiedC
           return null;
         }
 
-        return { xAxis, yAxis, columnType };
+        const page = parsePage(record.page);
+        const bbox = parseBoundingBox(record.bbox);
+
+        return {
+          xAxis,
+          yAxis,
+          columnType,
+          ...(page !== undefined ? { page } : {}),
+          ...(bbox ? { bbox } : {}),
+        };
       })
       .filter((item): item is CertifiedCoordinateData => item !== null),
     (row) => `${row.xAxis}__${row.yAxis}__${row.columnType}`,
@@ -229,6 +239,9 @@ export const normalizeFoundationPlanCoordinateRows = (rawData: unknown[]): Found
         const normalizedPlanColumnType =
           isHighlightedAliasCode(planColumnType) && isHighlighted !== true ? '' : planColumnType;
 
+        const page = parsePage(record.page);
+        const bbox = parseBoundingBox(record.bbox);
+
         return {
           foundation,
           xAxis,
@@ -236,6 +249,8 @@ export const normalizeFoundationPlanCoordinateRows = (rawData: unknown[]): Found
           planColumnType: normalizedPlanColumnType,
           ...(typeof isHighlighted === 'boolean' ? { isHighlighted } : {}),
           ...(highlightColor ? { highlightColor } : {}),
+          ...(page !== undefined ? { page } : {}),
+          ...(bbox ? { bbox } : {}),
         };
       })
       .filter((item): item is FoundationPlanCoordinateData => item !== null),
