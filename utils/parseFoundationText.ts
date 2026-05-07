@@ -1,6 +1,12 @@
 import { FoundationColumnData } from '../types';
 
 /**
+ * Normalize a label by uppercasing the trailing alphabetic suffix and column type prefixes
+ * (e.g. F1a -> F1A, c1 -> C1, fc1 -> FC1) so downstream comparisons are case-insensitive.
+ */
+const upperLabel = (value: string) => value.replace(/[a-zA-Z]/g, (c) => c.toUpperCase());
+
+/**
  * Parse foundation-column text input.
  * Supports formats:
  * 1. Old format: "F11 : C1" (Foundation : Column)
@@ -14,6 +20,7 @@ import { FoundationColumnData } from '../types';
  * - Removes duplicate lines
  * - Only keeps foundations matching Fxxx pattern (removes FK, FW, etc.)
  * - Removes parenthetical content like (SGL-***)
+ * - Trailing letter casing is normalized (F1a -> F1A, c1 -> C1)
  */
 export function parseFoundationColumnText(input: string): FoundationColumnData[] {
   if (!input.trim()) return [];
@@ -57,9 +64,12 @@ export function parseFoundationColumnText(input: string): FoundationColumnData[]
       }
     }
 
-    // Clean up columnType
-    columnType = columnType.trim();
+    // Clean up + normalize casing on columnType (c1 -> C1, fc1 -> FC1)
+    columnType = upperLabel(columnType.trim());
     if (!columnType) continue;
+
+    // Normalize foundation casing too (F1a -> F1A)
+    foundation = upperLabel(foundation);
 
     // Special case: If column type starts with F (but not FC or C), auto-fill foundation
     if (/^F\d+[A-Z]?$/i.test(columnType)) {

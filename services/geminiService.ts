@@ -117,7 +117,10 @@ Analyze the provided image/PDF of the foundation plan and generate a structured 
 
 const FOUNDATION_PRIORITY_API_VERSION = 'v1alpha';
 const FOUNDATION_PRIORITY_MODEL = 'gemini-3.1-pro-preview';
-const FOUNDATION_PRIORITY_THINKING_LEVEL = ThinkingLevel.HIGH;
+// Primary uses MEDIUM thinking — fast enough for clean foundation plans.
+// Fallback escalates to HIGH thinking + HIGH media resolution as the accuracy safety net.
+const FOUNDATION_PRIORITY_PRIMARY_THINKING_LEVEL = ThinkingLevel.MEDIUM;
+const FOUNDATION_PRIORITY_FALLBACK_THINKING_LEVEL = ThinkingLevel.HIGH;
 const FOUNDATION_PRIORITY_PRIMARY_MEDIA_RESOLUTION = PartMediaResolutionLevel.MEDIA_RESOLUTION_MEDIUM;
 const FOUNDATION_PRIORITY_FALLBACK_MEDIA_RESOLUTION = PartMediaResolutionLevel.MEDIA_RESOLUTION_HIGH;
 const FOUNDATION_PRIORITY_TEMPERATURE = 0;
@@ -125,7 +128,7 @@ const FOUNDATION_PRIORITY_TOP_P = 0.1;
 const FOUNDATION_PRIORITY_TOP_K = 1;
 const FOUNDATION_PRIORITY_CANDIDATE_COUNT = 1;
 const FOUNDATION_PRIORITY_SEED = 7;
-const FOUNDATION_PRIORITY_POLL_INTERVAL_MS = 1500;
+const FOUNDATION_PRIORITY_POLL_INTERVAL_MS = 400;
 
 type ActiveGeminiPdfFile = {
   name: string;
@@ -579,22 +582,28 @@ const foundationPlanCoordinateResponseSchema = {
   }
 };
 
+let cachedFoundationPriorityClient: GoogleGenAI | null = null;
+const getFoundationPriorityClient = () => {
+  if (cachedFoundationPriorityClient) return cachedFoundationPriorityClient;
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("VITE_GEMINI_API_KEY is not set");
+  }
+  cachedFoundationPriorityClient = new GoogleGenAI({
+    apiKey,
+    apiVersion: FOUNDATION_PRIORITY_API_VERSION,
+  });
+  return cachedFoundationPriorityClient;
+};
+
 const extractCoordinateDataFromPdf = async (
   file: File,
   prompt: string,
   responseJsonSchema: object,
   mediaResolution: PartMediaResolutionLevel,
+  thinkingLevel: ThinkingLevel,
 ) => {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("VITE_GEMINI_API_KEY is not set");
-  }
-
-  const ai = new GoogleGenAI({
-    apiKey,
-    apiVersion: FOUNDATION_PRIORITY_API_VERSION,
-  });
+  const ai = getFoundationPriorityClient();
 
   try {
     const uploadedFile = await uploadPdfAndWaitUntilActive(ai, file);
@@ -618,7 +627,7 @@ const extractCoordinateDataFromPdf = async (
         topK: FOUNDATION_PRIORITY_TOP_K,
         seed: FOUNDATION_PRIORITY_SEED,
         thinkingConfig: {
-          thinkingLevel: FOUNDATION_PRIORITY_THINKING_LEVEL,
+          thinkingLevel,
         },
       }
     });
@@ -642,6 +651,7 @@ export const extractCertifiedCoordinateData = async (file: File): Promise<Certif
     CERTIFIED_FOUNDATION_COORDINATE_PROMPT,
     certifiedCoordinateResponseSchema,
     FOUNDATION_PRIORITY_PRIMARY_MEDIA_RESOLUTION,
+    FOUNDATION_PRIORITY_PRIMARY_THINKING_LEVEL,
   );
 
   let validatedData = normalizeCertifiedCoordinateRows(rawData);
@@ -657,6 +667,7 @@ export const extractCertifiedCoordinateData = async (file: File): Promise<Certif
       CERTIFIED_FOUNDATION_COORDINATE_FALLBACK_PROMPT,
       certifiedCoordinateResponseSchema,
       FOUNDATION_PRIORITY_FALLBACK_MEDIA_RESOLUTION,
+      FOUNDATION_PRIORITY_FALLBACK_THINKING_LEVEL,
     );
 
     validatedData = normalizeCertifiedCoordinateRows(fallbackRawData);
@@ -679,6 +690,7 @@ export const extractFoundationPlanCoordinateData = async (file: File): Promise<F
     FOUNDATION_PLAN_COORDINATE_PROMPT,
     foundationPlanCoordinateResponseSchema,
     FOUNDATION_PRIORITY_PRIMARY_MEDIA_RESOLUTION,
+    FOUNDATION_PRIORITY_PRIMARY_THINKING_LEVEL,
   );
 
   let validatedData = normalizeFoundationPlanCoordinateRows(rawData);
@@ -694,6 +706,7 @@ export const extractFoundationPlanCoordinateData = async (file: File): Promise<F
       FOUNDATION_PLAN_COORDINATE_FALLBACK_PROMPT,
       foundationPlanCoordinateResponseSchema,
       FOUNDATION_PRIORITY_FALLBACK_MEDIA_RESOLUTION,
+      FOUNDATION_PRIORITY_FALLBACK_THINKING_LEVEL,
     );
 
     validatedData = normalizeFoundationPlanCoordinateRows(fallbackRawData);
