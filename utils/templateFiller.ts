@@ -367,10 +367,43 @@ export function fillTemplate(
     }
   }
 
-  // 8. Serialize the modified worksheet back to XML
+  // 8. Write the column-type summary into row 1 of the template.
+  //    Row 1 already exists (it contains the orange title + column-type labels like C2, C3 …).
+  //    We upsert only the foundation data cells — the merged title area is left untouched.
+  if (foundationCols.size > 0) {
+    const sheetDataEl =
+      doc.getElementsByTagNameNS(XLSX_NS, 'sheetData')[0] ??
+      doc.getElementsByTagName('sheetData')[0];
+
+    if (sheetDataEl) {
+      const summaryRowNum = 1;
+
+      // Re-use the existing <row r="1"> element; create one only if missing.
+      let summaryRowEl = findRow(doc, summaryRowNum);
+      if (!summaryRowEl) {
+        const ns = sheetDataEl.namespaceURI ?? XLSX_NS;
+        summaryRowEl = doc.createElementNS(ns, 'row');
+        summaryRowEl.setAttribute('r', String(summaryRowNum));
+        sheetDataEl.insertBefore(summaryRowEl, sheetDataEl.firstChild);
+      }
+
+      // Overwrite only the foundation data columns — one cell per column per foundation.
+      for (const [foundation, colIdxList] of foundationCols) {
+        const fRows = byFoundation.get(foundation) ?? [];
+        const types = [...new Set(fRows.map((r) => r.columnType))].filter(Boolean).join(', ');
+        if (!types) continue;
+        for (const colIdx of colIdxList) {
+          const cell = upsertCell(doc, summaryRowEl, colIdx, summaryRowNum);
+          writeCellValue(doc, cell, types, false);
+        }
+      }
+    }
+  }
+
+  // 9. Serialize the modified worksheet back to XML
   const modifiedXml = new XMLSerializer().serializeToString(doc);
 
-  // 9. Replace the worksheet file and re-zip; everything else (styles, VBA, …) is unchanged
+  // 10. Replace the worksheet file and re-zip; everything else (styles, VBA, …) is unchanged
   const output: Record<string, Uint8Array> = { ...files, [sheetPath]: encode(modifiedXml) };
   return zipSync(output, { level: 6 });
 }
