@@ -43,7 +43,7 @@ const TAB_ACCENT: Record<TabType, ViewerAccent> = {
   column: 'indigo',
   frame: 'amber',
   priority: 'cyan',
-  report: 'indigo',
+  report: 'violet',
 };
 
 const App: React.FC = () => {

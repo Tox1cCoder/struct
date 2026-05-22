@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { FrameFileResult } from '../types';
 
 interface FrameImageInputProps {
@@ -16,6 +16,7 @@ export const FrameImageInput: React.FC<FrameImageInputProps> = ({
   disabled = false,
   isActiveTab = true,
 }) => {
+  const [isDragOver, setIsDragOver] = useState(false);
   const disabledRef = useRef(disabled);
   const onImagePasteRef = useRef(onImagePaste);
   const isActiveTabRef = useRef(isActiveTab);
@@ -75,11 +76,51 @@ export const FrameImageInput: React.FC<FrameImageInputProps> = ({
   const hasResults = results.length > 0;
   const isProcessing = processingCount > 0;
 
+  const readImageFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      if (result) {
+        onImagePasteRef.current({
+          base64: result.split(',')[1],
+          mimeType: file.type,
+          preview: result,
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragOver(false);
+    if (disabled) return;
+    const files = Array.from(event.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
+    files.forEach(readImageFile);
+  };
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (!disabled) setIsDragOver(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragOver(false);
+  };
+
   return (
     <div className="space-y-3">
       <div
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
         className={`w-full border-2 border-dashed rounded-xl p-6 text-center transition-colors duration-200
-          ${disabled ? 'opacity-50 cursor-not-allowed border-gray-300' : 'border-amber-300 bg-amber-50/30'}`}
+          ${disabled
+            ? 'opacity-50 cursor-not-allowed border-gray-300'
+            : isDragOver
+              ? 'border-amber-500 bg-amber-50 cursor-pointer'
+              : 'border-amber-300 bg-amber-50/30 hover:border-amber-500 hover:bg-amber-50 cursor-pointer'
+          }`}
       >
         <div className="flex flex-col items-center justify-center space-y-3">
           <div className="p-3 bg-amber-100 rounded-full text-amber-600">

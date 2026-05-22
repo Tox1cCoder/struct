@@ -1,4 +1,11 @@
-import { createPartFromUri, FileState, GoogleGenAI, PartMediaResolutionLevel, ThinkingLevel, Type } from "@google/genai";
+import {
+  createPartFromUri,
+  FileState,
+  GoogleGenAI,
+  Type,
+  type PartMediaResolutionLevel,
+  type ThinkingLevel,
+} from "@google/genai";
 import { CertifiedCoordinateData, ColumnReinforcementData, FoundationColumnData, FoundationPlanCoordinateData, FrameData } from "../types";
 import { parseBoundingBox, parsePage } from "../utils/boundingBox";
 import {
@@ -7,6 +14,17 @@ import {
   summarizeRawCoordinateRows,
 } from "../utils/coordinateExtraction";
 import { logError } from "../utils/errorHandling";
+import {
+  FOUNDATION_PRIORITY_API_VERSION,
+  FOUNDATION_PRIORITY_FALLBACK_MEDIA_RESOLUTION,
+  FOUNDATION_PRIORITY_FALLBACK_THINKING_LEVEL,
+  FOUNDATION_PRIORITY_MODEL,
+  FOUNDATION_PRIORITY_POLL_INTERVAL_MS,
+  FOUNDATION_PRIORITY_PRIMARY_MEDIA_RESOLUTION,
+  FOUNDATION_PRIORITY_PRIMARY_THINKING_LEVEL,
+  createFoundationPriorityContents,
+  createFoundationPriorityGenerationConfig,
+} from "../utils/foundationPriorityGeminiConfig";
 
 const SPATIAL_INSTRUCTION_PDF = `
 
@@ -24,6 +42,14 @@ const SPATIAL_INSTRUCTION_IMAGE = `
 For each extracted item, also return "bbox": an object {"ymin": number, "xmin": number, "ymax": number, "xmax": number} giving normalized 0-1000 coordinates of the rectangle that tightly bounds the extracted data within the image. Use top-left origin (ymin/xmin = upper-left, ymax/xmax = lower-right).
 
 If you cannot localize an item confidently, omit "bbox" rather than guessing.
+`;
+
+const FOUNDATION_PRIORITY_SPATIAL_INSTRUCTION_PDF = `
+
+**Verification metadata (optional):**
+For each extracted item, include "page" when you can identify the 1-indexed source page.
+Include "bbox" only when you can confidently localize the extracted support/foundation item as normalized 0-1000 coordinates: {"ymin": number, "xmin": number, "ymax": number, "xmax": number}.
+Do not let bbox estimation block row extraction. If the row values are clear but the exact box is not, return the row and omit "bbox".
 `;
 
 const bboxSchemaTyped = {
@@ -115,21 +141,6 @@ Analyze the provided image/PDF of the foundation plan and generate a structured 
 **IMPORTANT:** Output a valid JSON array based on the schema provided.
 `;
 
-const FOUNDATION_PRIORITY_API_VERSION = 'v1alpha';
-const FOUNDATION_PRIORITY_MODEL = 'gemini-3.1-pro-preview';
-// Primary uses MEDIUM thinking — fast enough for clean foundation plans.
-// Fallback escalates to HIGH thinking + HIGH media resolution as the accuracy safety net.
-const FOUNDATION_PRIORITY_PRIMARY_THINKING_LEVEL = ThinkingLevel.MEDIUM;
-const FOUNDATION_PRIORITY_FALLBACK_THINKING_LEVEL = ThinkingLevel.HIGH;
-const FOUNDATION_PRIORITY_PRIMARY_MEDIA_RESOLUTION = PartMediaResolutionLevel.MEDIA_RESOLUTION_MEDIUM;
-const FOUNDATION_PRIORITY_FALLBACK_MEDIA_RESOLUTION = PartMediaResolutionLevel.MEDIA_RESOLUTION_HIGH;
-const FOUNDATION_PRIORITY_TEMPERATURE = 0;
-const FOUNDATION_PRIORITY_TOP_P = 0.1;
-const FOUNDATION_PRIORITY_TOP_K = 1;
-const FOUNDATION_PRIORITY_CANDIDATE_COUNT = 1;
-const FOUNDATION_PRIORITY_SEED = 7;
-const FOUNDATION_PRIORITY_POLL_INTERVAL_MS = 400;
-
 type ActiveGeminiPdfFile = {
   name: string;
   uri: string;
@@ -158,7 +169,7 @@ Extraction rules:
 7. Ignore foundation labels that start with F in this PDF, if any exist.
 8. Remove whitespace and notes in parentheses from extracted values.
 9. If an axis locator cannot be read confidently, omit that row instead of guessing.
-${SPATIAL_INSTRUCTION_PDF}
+${FOUNDATION_PRIORITY_SPATIAL_INSTRUCTION_PDF}
 Output a valid JSON array based on the provided schema.
 `;
 
@@ -190,7 +201,7 @@ Example output:
   { "xAxis": "X1", "yAxis": "Y1", "columnType": "C3009", "page": 1, "bbox": { "ymin": 410, "xmin": 220, "ymax": 470, "xmax": 290 } },
   { "xAxis": "X4", "yAxis": "Y6-Y7", "columnType": "P1", "page": 2 }
 ]
-${SPATIAL_INSTRUCTION_PDF}
+${FOUNDATION_PRIORITY_SPATIAL_INSTRUCTION_PDF}
 Output a valid JSON array based on the provided schema.
 `;
 
@@ -225,7 +236,7 @@ Extraction rules:
 10. Also return highlightColor with a simple color name like YELLOW, CYAN, BLUE, GREEN, PINK, RED, or empty string if none.
 11. Output one row per unique support location. The same foundation label may appear multiple times.
 12. If an axis locator cannot be read confidently, omit that row instead of guessing.
-${SPATIAL_INSTRUCTION_PDF}
+${FOUNDATION_PRIORITY_SPATIAL_INSTRUCTION_PDF}
 Output a valid JSON array based on the provided schema.
 `;
 
@@ -262,7 +273,7 @@ Example output:
   { "foundation": "F1", "xAxis": "X1", "yAxis": "Y1", "planColumnType": "FC1", "isHighlighted": true, "highlightColor": "YELLOW", "page": 1, "bbox": { "ymin": 220, "xmin": 410, "ymax": 280, "xmax": 480 } },
   { "foundation": "F1", "xAxis": "X1-X2", "yAxis": "Y2", "planColumnType": "", "isHighlighted": false, "highlightColor": "", "page": 1 }
 ]
-${SPATIAL_INSTRUCTION_PDF}
+${FOUNDATION_PRIORITY_SPATIAL_INSTRUCTION_PDF}
 Output a valid JSON array based on the provided schema.
 `;
 
@@ -607,29 +618,16 @@ const extractCoordinateDataFromPdf = async (
 
   try {
     const uploadedFile = await uploadPdfAndWaitUntilActive(ai, file);
+    const filePart = createPartFromUri(
+      uploadedFile.uri,
+      uploadedFile.mimeType,
+      mediaResolution,
+    );
 
     const response = await ai.models.generateContent({
       model: FOUNDATION_PRIORITY_MODEL,
-      contents: [
-        prompt,
-        createPartFromUri(
-          uploadedFile.uri,
-          uploadedFile.mimeType,
-          mediaResolution,
-        ),
-      ],
-      config: {
-        responseMimeType: 'application/json',
-        responseJsonSchema,
-        candidateCount: FOUNDATION_PRIORITY_CANDIDATE_COUNT,
-        temperature: FOUNDATION_PRIORITY_TEMPERATURE,
-        topP: FOUNDATION_PRIORITY_TOP_P,
-        topK: FOUNDATION_PRIORITY_TOP_K,
-        seed: FOUNDATION_PRIORITY_SEED,
-        thinkingConfig: {
-          thinkingLevel,
-        },
-      }
+      contents: createFoundationPriorityContents(filePart, prompt),
+      config: createFoundationPriorityGenerationConfig(responseJsonSchema, thinkingLevel),
     });
 
     const jsonText = response.text;

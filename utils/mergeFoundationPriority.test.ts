@@ -25,6 +25,43 @@ describe('buildFoundationPriorityText', () => {
     expect(result.text).toBe('F1: C3009');
   });
 
+  it('uses the foundation plan location as the viewer source for certified fallback entries', async () => {
+    const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
+
+    const result = buildFoundationPriorityText(
+      [
+        {
+          xAxis: 'X1',
+          yAxis: 'Y1',
+          columnType: 'C3009',
+          sourceFileId: 'certified-file',
+          page: 3,
+          bbox: { ymin: 100, xmin: 100, ymax: 200, xmax: 200 },
+        },
+      ],
+      [
+        {
+          foundation: 'F1',
+          xAxis: 'X1',
+          yAxis: 'Y1',
+          planColumnType: '',
+          sourceFileId: 'plan-file',
+          page: 7,
+          bbox: { ymin: 300, xmin: 400, ymax: 500, xmax: 600 },
+        },
+      ],
+    );
+
+    expect(result.entries[0]).toMatchObject({
+      foundation: 'F1',
+      columnType: 'C3009',
+      origin: 'certified',
+      sourceFileId: 'plan-file',
+      page: 7,
+      bbox: { ymin: 300, xmin: 400, ymax: 500, xmax: 600 },
+    });
+  });
+
   it('treats certified P codes the same as certified C codes', async () => {
     const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
 

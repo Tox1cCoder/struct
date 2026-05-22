@@ -1,6 +1,6 @@
 import { BoundingBox, ProcessingStatus } from '../../types';
 
-export type ViewerAccent = 'indigo' | 'amber' | 'cyan' | 'emerald';
+export type ViewerAccent = 'indigo' | 'amber' | 'cyan' | 'emerald' | 'violet';
 
 export interface ViewerFile {
   id: string;
@@ -65,5 +65,14 @@ export const ACCENT_CLASSES: Record<ViewerAccent, {
     ring: 'ring-emerald-500',
     bboxStroke: 'rgb(16, 185, 129)',
     bboxFill: 'rgba(16, 185, 129, 0.18)',
+  },
+  violet: {
+    bg: 'bg-violet-500',
+    bgSoft: 'bg-violet-50',
+    border: 'border-violet-300',
+    text: 'text-violet-700',
+    ring: 'ring-violet-500',
+    bboxStroke: 'rgb(139, 92, 246)',
+    bboxFill: 'rgba(139, 92, 246, 0.18)',
   },
 };

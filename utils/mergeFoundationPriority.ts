@@ -147,9 +147,9 @@ export const buildFoundationPriorityText = (
       addCode(normalizedRow.foundation, {
         columnType: certifiedRow.columnType,
         origin: 'certified',
-        sourceFileId: certifiedRow.sourceFileId,
-        page: certifiedRow.page,
-        bbox: certifiedRow.bbox,
+        sourceFileId: normalizedRow.sourceFileId ?? certifiedRow.sourceFileId,
+        page: normalizedRow.page ?? certifiedRow.page,
+        bbox: normalizedRow.bbox ?? certifiedRow.bbox,
       });
     }
   }
