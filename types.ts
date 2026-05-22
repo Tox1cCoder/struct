@@ -133,3 +133,53 @@ export interface FrameFileResult {
   error?: string;
   sourceMimeType?: string;
 }
+
+// ---- Report Template ----
+
+export interface RowMapping {
+  rowIndex: number;      // 1-indexed row in the Excel sheet
+  label: string;         // text found in the label column for this row
+  sourceField: SourceField | null;
+}
+
+export interface TemplateMappingConfig {
+  sheetIndex: number;
+  headerRow: number;     // 1-indexed row that contains foundation IDs
+  labelColumn: string;   // column letter (e.g. "B") containing parameter names
+  rowMappings: RowMapping[];
+  multiValueStrategy: MultiValueStrategy;
+}
+
+export type SourceField =
+  | 'columnType'
+  | 'dimensionWidth'
+  | 'dimensionHeight'
+  | 'mainReinforcementCount'
+  | 'mainReinforcementSize'
+  | 'hoopReinforcementSize'
+  | 'hoopReinforcementSpacing'
+  | 'bColumn'
+  | 'hColumn';
+
+export type MultiValueStrategy = 'first' | 'most-common' | 'largest' | 'all';
+
+export type GroupColor = 'blue' | 'green' | 'yellow' | 'orange' | 'purple' | 'pink' | 'teal' | 'indigo';
+
+export interface TemplateParam {
+  id: string;
+  label: string;
+  sourceField: SourceField;
+}
+
+export interface TemplateGroup {
+  id: string;
+  name: string;
+  color: GroupColor;
+  params: TemplateParam[];
+}
+
+export interface ReportTemplate {
+  name: string;
+  groups: TemplateGroup[];
+  multiValueStrategy: MultiValueStrategy;
+}

@@ -5,6 +5,7 @@ import { ResultsTable } from './components/ResultsTable';
 import { FrameImageInput } from './components/FrameImageInput';
 import { FrameResultsTable } from './components/FrameResultsTable';
 import { FoundationPriorityTextResult } from './components/FoundationPriorityTextResult';
+import { ReportTab } from './components/report/ReportTab';
 import { ViewerSidebar } from './components/viewer/ViewerSidebar';
 import { ViewerAccent, ViewerFile, ViewerSelection } from './components/viewer/types';
 import {
@@ -26,7 +27,7 @@ import { getErrorMessage, logError } from './utils/errorHandling';
 import { mergeReinforcementWithFoundation } from './utils/mergeData';
 import { buildFoundationPriorityText } from './utils/mergeFoundationPriority';
 
-type TabType = 'column' | 'frame' | 'priority';
+type TabType = 'column' | 'frame' | 'priority' | 'report';
 
 interface RowSourceClick {
   fileId: string;
@@ -42,6 +43,7 @@ const TAB_ACCENT: Record<TabType, ViewerAccent> = {
   column: 'indigo',
   frame: 'amber',
   priority: 'cyan',
+  report: 'indigo',
 };
 
 const App: React.FC = () => {
@@ -452,6 +454,7 @@ const App: React.FC = () => {
           error: r.error,
         }));
     }
+    if (activeTab === 'report') return [];
     return [
       ...certifiedResults.map<ViewerFile>((r) => ({
         id: r.id,
@@ -547,6 +550,12 @@ const App: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m5.25 2.25a8.25 8.25 0 1 1-16.5 0 8.25 8.25 0 0 1 16.5 0Z" />
               </svg>
               Foundation Priority
+            </TabButton>
+            <TabButton active={activeTab === 'report'} accent="violet" onClick={() => handleTabChange('report')}>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+              </svg>
+              Report
             </TabButton>
           </nav>
         </div>
@@ -733,6 +742,10 @@ const App: React.FC = () => {
               </div>
             </>
           )}
+
+          {activeTab === 'report' && (
+            <ReportTab data={mergedData} />
+          )}
         </main>
 
         <ViewerSidebar
@@ -756,7 +769,7 @@ const App: React.FC = () => {
 
 interface TabButtonProps {
   active: boolean;
-  accent: 'indigo' | 'amber' | 'cyan';
+  accent: 'indigo' | 'amber' | 'cyan' | 'violet';
   onClick: () => void;
   children: React.ReactNode;
 }
@@ -766,6 +779,7 @@ const TabButton: React.FC<TabButtonProps> = ({ active, accent, onClick, children
     indigo: 'border-indigo-500 text-indigo-600',
     amber: 'border-amber-500 text-amber-600',
     cyan: 'border-cyan-500 text-cyan-600',
+    violet: 'border-violet-500 text-violet-600',
   };
   return (
     <button
