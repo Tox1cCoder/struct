@@ -4,6 +4,12 @@ import './pdfjsWorker';
 import { BboxOverlay } from './BboxOverlay';
 import { ViewerAccent, ViewerFile, ViewerSelection } from './types';
 
+const pdfOptions = {
+  cMapUrl: `${import.meta.env.BASE_URL}pdfjs/cmaps/`,
+  cMapPacked: true,
+  standardFontDataUrl: `${import.meta.env.BASE_URL}pdfjs/standard_fonts/`,
+};
+
 interface DocumentViewerProps {
   file: ViewerFile;
   selection: ViewerSelection | null;
@@ -89,6 +95,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
           {isPdf && (
             <Document
               file={file.sourceUrl}
+              options={pdfOptions}
               loading={<PdfLoading />}
               error={<EmptyState title="Failed to load PDF" message={pdfError ?? 'The PDF could not be rendered.'} />}
               onLoadError={(error) => setPdfError(error.message)}

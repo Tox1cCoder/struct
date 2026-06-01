@@ -85,6 +85,7 @@ export interface CertifiedCoordinateFileResult {
   sourceUrl?: string;
   sourceMimeType?: string;
   pageCount?: number;
+  diagnostics?: PriorityPipelineDiagnostics;
 }
 
 export interface FoundationPlanCoordinateData {
@@ -109,6 +110,7 @@ export interface FoundationPlanCoordinateFileResult {
   sourceUrl?: string;
   sourceMimeType?: string;
   pageCount?: number;
+  diagnostics?: PriorityPipelineDiagnostics;
 }
 
 export interface FrameData {
@@ -129,7 +131,7 @@ export interface FrameFileResult {
   id: string;
   imagePreview: string;
   status: ProcessingStatus;
-  data: FrameData | null;
+  data: FrameData[];
   error?: string;
   sourceMimeType?: string;
 }
@@ -182,4 +184,66 @@ export interface ReportTemplate {
   name: string;
   groups: TemplateGroup[];
   multiValueStrategy: MultiValueStrategy;
+}
+
+// ---- Editable working rows ----
+
+export interface EditableRowMeta {
+  rowId: string;
+  sourceKey: string;
+  sourceFileIds: string[];
+  provenance: 'extracted' | 'manual';
+  edited: boolean;
+}
+
+export interface EditableRowsState<T extends EditableRowMeta> {
+  rows: T[];
+  deletedSourceKeys: string[];
+}
+
+export type EditableExpandedReinforcementData = ExpandedReinforcementData & EditableRowMeta;
+export type EditableFrameData = FrameData & EditableRowMeta;
+
+// ---- Foundation Priority evidence ----
+
+export type PrioritySourceRole = 'plan' | 'certified';
+
+export interface SourceEvidence extends SourceLocation {
+  fileId: string;
+  role: PrioritySourceRole;
+  xAxis: string;
+  yAxis: string;
+}
+
+export interface FoundationPriorityEvidenceLocation {
+  evidenceId: string;
+  plan: SourceEvidence;
+  certified?: SourceEvidence;
+}
+
+export interface FoundationPriorityResolution {
+  columnType: string;
+  method: 'plan-fc' | 'certified-fallback';
+  locations: FoundationPriorityEvidenceLocation[];
+}
+
+export interface FoundationPriorityWorkingRow extends EditableRowMeta {
+  foundation: string;
+  codes: string[];
+  resolutions: FoundationPriorityResolution[];
+}
+
+export interface PriorityPipelineDiagnostics {
+  fileName: string;
+  role: 'certified' | 'plan';
+  stages: {
+    uploadMs?: number;
+    primaryGenerationMs?: number;
+    primaryValidationMs?: number;
+    fallbackGenerationMs?: number;
+    fallbackValidationMs?: number;
+    totalMs?: number;
+  };
+  passUsed: 'primary' | 'escalated';
+  escalationReason?: string;
 }

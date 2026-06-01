@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { getErrorMessage } from './errorHandling';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getErrorMessage, logError } from './errorHandling';
 
 describe('getErrorMessage', () => {
   it('returns the message from a standard Error', () => {
@@ -17,5 +17,21 @@ describe('getErrorMessage', () => {
 
   it('falls back to a provided default for unhelpful values', () => {
     expect(getErrorMessage({} as Record<string, never>, 'Fallback message')).toBe('Fallback message');
+  });
+});
+
+describe('logError', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('does not write a handled user-visible processing failure to the console', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    logError('PDF extraction failed', new Error('Bad response'), { handled: true });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('reports unexpected failures once for diagnosis', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    logError('Viewer crashed', new Error('Render failed'));
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

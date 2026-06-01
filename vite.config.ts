@@ -1,15 +1,30 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
 
-export default defineConfig(() => {
-  return {
-    plugins: [react()],
-    // GitHub Pages usually serves from a subdirectory (the repo name).
-    // If you are using a custom domain, change this to '/'.
-    // We try to auto-detect the repo name from package.json name or assume root if unavailable.
-    base: './',
-    server: {
-      host: true, // Expose to network (0.0.0.0)
+export default defineConfig({
+  base: './',
+  plugins: [
+    react(),
+    tailwindcss(),
+    viteStaticCopy({
+      targets: [
+        { src: 'node_modules/pdfjs-dist/cmaps/*', dest: 'pdfjs/cmaps' },
+        { src: 'node_modules/pdfjs-dist/standard_fonts/*', dest: 'pdfjs/standard_fonts' },
+      ],
+    }),
+  ],
+  server: { host: true },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          genai: ['@google/genai'],
+          spreadsheet: ['xlsx'],
+          pdfViewer: ['react-pdf', 'pdfjs-dist'],
+        },
+      },
     },
-  };
+  },
 });

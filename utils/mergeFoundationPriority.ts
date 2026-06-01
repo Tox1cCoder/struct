@@ -1,7 +1,16 @@
+import {
+  BoundingBox,
+  FoundationPriorityEvidenceLocation,
+  FoundationPriorityResolution,
+  FoundationPriorityWorkingRow,
+  PrioritySourceRole,
+  SourceEvidence,
+} from '../types';
+
 export interface CoordinateSource {
   sourceFileId?: string;
   page?: number;
-  bbox?: { ymin: number; xmin: number; ymax: number; xmax: number };
+  bbox?: BoundingBox;
 }
 
 export interface CertifiedCoordinateRow extends CoordinateSource {
@@ -17,16 +26,9 @@ export interface FoundationPlanCoordinateRow extends CoordinateSource {
   planColumnType: string;
 }
 
-export interface FoundationPriorityEntry extends CoordinateSource {
-  foundation: string;
-  columnType: string;
-  text: string;
-  origin: 'plan' | 'certified';
-}
-
 export interface FoundationPriorityTextResult {
+  rows: FoundationPriorityWorkingRow[];
   lines: string[];
-  entries: FoundationPriorityEntry[];
   text: string;
 }
 
@@ -85,6 +87,21 @@ const normalizeFoundationPlanRow = (row: FoundationPlanCoordinateRow): Foundatio
   };
 };
 
+const makeEvidence = (
+  fileId: string | undefined,
+  role: PrioritySourceRole,
+  xAxis: string,
+  yAxis: string,
+  page?: number,
+  bbox?: BoundingBox,
+): SourceEvidence | null => {
+  if (!fileId) return null;
+  return { fileId, role, xAxis, yAxis, page, bbox };
+};
+
+const formatPriorityRow = (row: Pick<FoundationPriorityWorkingRow, 'foundation' | 'codes'>) =>
+  `${row.foundation}: ${row.codes.join(', ')}`;
+
 export const buildFoundationPriorityText = (
   certifiedRows: CertifiedCoordinateRow[],
   foundationPlanRows: FoundationPlanCoordinateRow[],
@@ -93,10 +110,7 @@ export const buildFoundationPriorityText = (
 
   for (const row of certifiedRows) {
     const normalizedRow = normalizeCertifiedRow(row);
-
-    if (!normalizedRow) {
-      continue;
-    }
+    if (!normalizedRow) continue;
 
     const key = toCoordinateKey(normalizedRow.xAxis, normalizedRow.yAxis);
     if (!certifiedByCoordinate.has(key)) {
@@ -104,79 +118,135 @@ export const buildFoundationPriorityText = (
     }
   }
 
-  type ResolvedCode = {
+  // For each foundation, group resolutions by columnType. Each resolution
+  // collects all locations where that columnType was resolved.
+  type ResolutionAccumulator = {
     columnType: string;
-    origin: 'plan' | 'certified';
-    sourceFileId?: string;
-    page?: number;
-    bbox?: CoordinateSource['bbox'];
+    method: 'plan-fc' | 'certified-fallback';
+    locations: FoundationPriorityEvidenceLocation[];
+    codeOrder: number;
   };
 
-  const foundationToCodes = new Map<string, Map<string, ResolvedCode>>();
-
-  const addCode = (foundation: string, code: ResolvedCode) => {
-    const existing = foundationToCodes.get(foundation) ?? new Map<string, ResolvedCode>();
-    if (!existing.has(code.columnType)) {
-      existing.set(code.columnType, code);
-    }
-    foundationToCodes.set(foundation, existing);
-  };
+  const foundationToResolutions = new Map<string, Map<string, ResolutionAccumulator>>();
+  const foundationContributingFiles = new Map<string, Set<string>>();
+  const foundationFirstSeen = new Map<string, number>();
+  let foundationSeq = 0;
+  let codeSeq = 0;
 
   for (const row of foundationPlanRows) {
     const normalizedRow = normalizeFoundationPlanRow(row);
+    if (!normalizedRow) continue;
 
-    if (!normalizedRow) {
-      continue;
+    const planColumnType = normalizedRow.planColumnType;
+    const hasFc = isValidColumnCode(planColumnType) && isFcCode(planColumnType);
+    const coordKey = toCoordinateKey(normalizedRow.xAxis, normalizedRow.yAxis);
+    const certifiedMatch = certifiedByCoordinate.get(coordKey);
+
+    let resolvedColumnType: string | null = null;
+    let method: 'plan-fc' | 'certified-fallback' | null = null;
+
+    if (hasFc) {
+      resolvedColumnType = planColumnType;
+      method = 'plan-fc';
+    } else if (certifiedMatch) {
+      resolvedColumnType = certifiedMatch.columnType;
+      method = 'certified-fallback';
     }
 
-    if (isValidColumnCode(normalizedRow.planColumnType) && isFcCode(normalizedRow.planColumnType)) {
-      addCode(normalizedRow.foundation, {
-        columnType: normalizedRow.planColumnType,
-        origin: 'plan',
-        sourceFileId: normalizedRow.sourceFileId,
-        page: normalizedRow.page,
-        bbox: normalizedRow.bbox,
+    if (!resolvedColumnType || !method) continue;
+
+    const planEvidence = makeEvidence(
+      normalizedRow.sourceFileId,
+      'plan',
+      normalizedRow.xAxis,
+      normalizedRow.yAxis,
+      normalizedRow.page,
+      normalizedRow.bbox,
+    );
+    const certifiedEvidence = certifiedMatch
+      ? makeEvidence(
+          certifiedMatch.sourceFileId,
+          'certified',
+          certifiedMatch.xAxis,
+          certifiedMatch.yAxis,
+          certifiedMatch.page,
+          certifiedMatch.bbox,
+        )
+      : null;
+
+    // Plan evidence is required; if it's missing fileId, build a synthetic one
+    // so the location is still tracked but viewer cannot open it.
+    const planForLocation: SourceEvidence = planEvidence ?? {
+      fileId: '',
+      role: 'plan',
+      xAxis: normalizedRow.xAxis,
+      yAxis: normalizedRow.yAxis,
+      page: normalizedRow.page,
+      bbox: normalizedRow.bbox,
+    };
+
+    const evidenceLocation: FoundationPriorityEvidenceLocation = {
+      evidenceId: `${normalizedRow.foundation}:${normalizedRow.xAxis}:${normalizedRow.yAxis}`,
+      plan: planForLocation,
+      ...(certifiedEvidence ? { certified: certifiedEvidence } : {}),
+    };
+
+    if (!foundationFirstSeen.has(normalizedRow.foundation)) {
+      foundationFirstSeen.set(normalizedRow.foundation, foundationSeq++);
+    }
+
+    const filesForFoundation =
+      foundationContributingFiles.get(normalizedRow.foundation) ?? new Set<string>();
+    if (planEvidence?.fileId) filesForFoundation.add(planEvidence.fileId);
+    if (certifiedEvidence?.fileId) filesForFoundation.add(certifiedEvidence.fileId);
+    foundationContributingFiles.set(normalizedRow.foundation, filesForFoundation);
+
+    const byColumnType =
+      foundationToResolutions.get(normalizedRow.foundation) ?? new Map<string, ResolutionAccumulator>();
+    const existing = byColumnType.get(resolvedColumnType);
+    if (existing) {
+      // Preserve the strongest method: plan-fc beats certified-fallback.
+      if (existing.method === 'certified-fallback' && method === 'plan-fc') {
+        existing.method = 'plan-fc';
+      }
+      existing.locations.push(evidenceLocation);
+    } else {
+      byColumnType.set(resolvedColumnType, {
+        columnType: resolvedColumnType,
+        method,
+        locations: [evidenceLocation],
+        codeOrder: codeSeq++,
       });
-      continue;
     }
-
-    const key = toCoordinateKey(normalizedRow.xAxis, normalizedRow.yAxis);
-    const certifiedRow = certifiedByCoordinate.get(key);
-
-    if (certifiedRow) {
-      addCode(normalizedRow.foundation, {
-        columnType: certifiedRow.columnType,
-        origin: 'certified',
-        sourceFileId: normalizedRow.sourceFileId ?? certifiedRow.sourceFileId,
-        page: normalizedRow.page ?? certifiedRow.page,
-        bbox: normalizedRow.bbox ?? certifiedRow.bbox,
-      });
-    }
+    foundationToResolutions.set(normalizedRow.foundation, byColumnType);
   }
 
-  const sortedFoundations = [...foundationToCodes.entries()].sort(([leftFoundation], [rightFoundation]) =>
-    naturalCompare(leftFoundation, rightFoundation),
+  const sortedFoundations = [...foundationToResolutions.entries()].sort(([leftF], [rightF]) =>
+    naturalCompare(leftF, rightF),
   );
 
-  const entries: FoundationPriorityEntry[] = sortedFoundations.flatMap(([foundation, codes]) => {
-    return [...codes.values()]
-      .sort((left, right) => naturalCompare(left.columnType, right.columnType))
-      .map((code) => ({
-        foundation,
-        columnType: code.columnType,
-        origin: code.origin,
-        text: `${foundation}: ${code.columnType}`,
-        sourceFileId: code.sourceFileId,
-        page: code.page,
-        bbox: code.bbox,
-      }));
+  const rows: FoundationPriorityWorkingRow[] = sortedFoundations.map(([foundation, byColumnType]) => {
+    const resolutions: FoundationPriorityResolution[] = [...byColumnType.values()]
+      .sort((a, b) => a.codeOrder - b.codeOrder)
+      .map(({ columnType, method, locations }) => ({ columnType, method, locations }));
+
+    const codes = resolutions.map((res) => res.columnType);
+    const sourceKey = `priority:${foundation}`;
+    const fileIds = foundationContributingFiles.get(foundation);
+
+    return {
+      rowId: sourceKey,
+      sourceKey,
+      sourceFileIds: fileIds ? [...fileIds] : [],
+      provenance: 'extracted',
+      edited: false,
+      foundation,
+      codes,
+      resolutions,
+    };
   });
 
-  const lines = entries.map((entry) => entry.text);
+  const lines = rows.map(formatPriorityRow);
 
-  return {
-    lines,
-    entries,
-    text: lines.join('\n'),
-  };
+  return { rows, lines, text: lines.join('\n') };
 };

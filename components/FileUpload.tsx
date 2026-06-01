@@ -146,6 +146,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       data-zone-id={zoneId}
     >
       <input
+        aria-label={title}
         type="file"
         ref={fileInputRef}
         onChange={handleFileChange}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { BoundingBox, ExpandedReinforcementData } from '../types';
+import { BoundingBox, EditableExpandedReinforcementData, ExpandedReinforcementData } from '../types';
 
 interface RowSource {
   fileId: string;
@@ -9,20 +9,26 @@ interface RowSource {
 }
 
 interface ResultsTableProps {
-  data: ExpandedReinforcementData[];
+  data: EditableExpandedReinforcementData[];
   hasFoundationData?: boolean;
   selectedRowKey?: string | null;
   onRowSelect?: (rowKey: string, source: RowSource | null) => void;
+  onRowChange?: (rowId: string, patch: Partial<ExpandedReinforcementData>) => void;
+  onAddRow?: () => void;
+  onDeleteRow?: (rowId: string) => void;
 }
 
-const rowKeyOf = (row: ExpandedReinforcementData, index: number) =>
-  `${row.foundation ?? ''}::${row.columnType}::${index}`;
+const rowLabelOf = (row: EditableExpandedReinforcementData) =>
+  row.foundation || row.columnType || row.rowId;
 
 export const ResultsTable: React.FC<ResultsTableProps> = ({
   data,
   hasFoundationData = false,
   selectedRowKey,
   onRowSelect,
+  onRowChange,
+  onAddRow,
+  onDeleteRow,
 }) => {
   const [exporting, setExporting] = useState(false);
 
@@ -30,11 +36,21 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
     return (
       <div className="text-center p-8 bg-white rounded-lg shadow-sm border border-gray-100">
         <p className="text-gray-500">No reinforcement data available.</p>
+        {onAddRow && (
+          <button
+            type="button"
+            onClick={onAddRow}
+            className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md hover:bg-indigo-100"
+          >
+            Add row
+          </button>
+        )}
       </div>
     );
   }
 
-  const hasBHData = data.some(row => row.bColumn || row.hColumn);
+  const hasBHData = data.some((row) => row.bColumn || row.hColumn);
+  const editable = Boolean(onRowChange);
 
   const handleExportExcel = () => {
     setExporting(true);
@@ -55,7 +71,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
         headers.push('柱_ly');
       }
 
-      const rows = data.map(row => {
+      const rows = data.map((row) => {
         const cells: string[] = [];
         if (hasFoundationData) cells.push(row.foundation || '');
         cells.push(row.columnType);
@@ -107,18 +123,22 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
     }
   };
 
-  const handleRowClick = (row: ExpandedReinforcementData, index: number) => {
+  const handleViewSource = (row: EditableExpandedReinforcementData) => {
     if (!onRowSelect) return;
-    const key = rowKeyOf(row, index);
     if (!row.sourceFileId) {
-      onRowSelect(key, null);
+      onRowSelect(row.rowId, null);
       return;
     }
-    onRowSelect(key, {
+    onRowSelect(row.rowId, {
       fileId: row.sourceFileId,
       page: row.page,
       bbox: row.bbox,
     });
+  };
+
+  const handlePatch = (row: EditableExpandedReinforcementData, patch: Partial<ExpandedReinforcementData>) => {
+    if (!onRowChange) return;
+    onRowChange(row.rowId, patch);
   };
 
   return (
@@ -135,29 +155,24 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
             </span>
           )}
         </div>
-        <button
-          onClick={handleExportExcel}
-          disabled={exporting}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all disabled:opacity-50"
-        >
-          {exporting ? (
-            <>
-              <svg className="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Exporting...
-            </>
-          ) : (
-            <>
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-green-600">
-                <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
-                <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
-              </svg>
-              Export as Excel
-            </>
+        <div className="flex items-center gap-2">
+          {onAddRow && (
+            <button
+              type="button"
+              onClick={onAddRow}
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md hover:bg-indigo-100"
+            >
+              Add row
+            </button>
           )}
-        </button>
+          <button
+            onClick={handleExportExcel}
+            disabled={exporting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all disabled:opacity-50"
+          >
+            {exporting ? 'Exporting...' : 'Export as Excel'}
+          </button>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left">
@@ -179,56 +194,179 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                   <th className="px-4 py-3 font-semibold border-b border-gray-200">柱_ly</th>
                 </>
               )}
+              {(onRowSelect || onDeleteRow) && (
+                <th className="px-4 py-3 font-semibold border-b border-gray-200">Actions</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {data.map((row, index) => {
-              const key = rowKeyOf(row, index);
-              const isSelected = key === selectedRowKey;
-              const clickable = Boolean(onRowSelect && row.sourceFileId);
+            {data.map((row) => {
+              const label = rowLabelOf(row);
+              const isSelected = row.rowId === selectedRowKey;
               return (
                 <tr
-                  key={key}
-                  onClick={() => handleRowClick(row, index)}
+                  key={row.rowId}
                   className={`transition-colors duration-150 ${
-                    isSelected
-                      ? 'bg-indigo-50 ring-1 ring-inset ring-indigo-300'
-                      : 'hover:bg-gray-50'
-                  } ${clickable ? 'cursor-pointer' : ''}`}
+                    isSelected ? 'bg-indigo-50 ring-1 ring-inset ring-indigo-300' : 'hover:bg-gray-50'
+                  }`}
                 >
                   {hasFoundationData && (
                     <td className={`px-4 py-3 text-sm font-semibold text-emerald-700 ${isSelected ? 'border-l-[3px] border-l-indigo-500' : ''}`}>
                       {row.foundation || '-'}
+                      {row.provenance === 'manual' && (
+                        <span className="ml-2 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                          Manual
+                        </span>
+                      )}
+                      {row.edited && row.provenance === 'extracted' && (
+                        <span className="ml-2 inline-block rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+                          Edited
+                        </span>
+                      )}
                     </td>
                   )}
                   <td className={`px-4 py-3 text-sm font-bold text-gray-900 ${isSelected && !hasFoundationData ? 'border-l-[3px] border-l-indigo-500' : ''}`}>
-                    {row.columnType}
-                    {row.bbox && (
-                      <span className="ml-2 inline-block h-1.5 w-1.5 rounded-full bg-indigo-400" title="Source bounding box available" />
+                    {editable ? (
+                      <input
+                        aria-label={`${label} column type`}
+                        value={row.columnType}
+                        onChange={(e) => handlePatch(row, { columnType: e.target.value })}
+                        className="w-24 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.columnType
                     )}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.dimensionWidth}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.dimensionHeight}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.mainReinforcementCount}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.mainReinforcementSize}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.hoopReinforcementSize}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.hoopReinforcementSpacing}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} dimension lx`}
+                        value={row.dimensionWidth}
+                        onChange={(e) => handlePatch(row, { dimensionWidth: e.target.value })}
+                        className="w-20 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.dimensionWidth
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} dimension ly`}
+                        value={row.dimensionHeight}
+                        onChange={(e) => handlePatch(row, { dimensionHeight: e.target.value })}
+                        className="w-20 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.dimensionHeight
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} main count`}
+                        value={row.mainReinforcementCount}
+                        onChange={(e) => handlePatch(row, { mainReinforcementCount: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.mainReinforcementCount
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} main size`}
+                        value={row.mainReinforcementSize}
+                        onChange={(e) => handlePatch(row, { mainReinforcementSize: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.mainReinforcementSize
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} hoop size`}
+                        value={row.hoopReinforcementSize}
+                        onChange={(e) => handlePatch(row, { hoopReinforcementSize: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.hoopReinforcementSize
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} hoop spacing`}
+                        value={row.hoopReinforcementSpacing}
+                        onChange={(e) => handlePatch(row, { hoopReinforcementSpacing: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.hoopReinforcementSpacing
+                    )}
+                  </td>
                   {hasBHData && (
                     <>
-                      <td className="px-4 py-3 text-sm text-indigo-700 font-mono">{row.bColumn || ''}</td>
-                      <td className="px-4 py-3 text-sm text-indigo-700 font-mono">{row.hColumn || ''}</td>
+                      <td className="px-4 py-3 text-sm text-indigo-700 font-mono">
+                        {editable ? (
+                          <input
+                            aria-label={`${label} b column`}
+                            value={row.bColumn ?? ''}
+                            onChange={(e) => handlePatch(row, { bColumn: e.target.value })}
+                            className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                          />
+                        ) : (
+                          row.bColumn || ''
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-indigo-700 font-mono">
+                        {editable ? (
+                          <input
+                            aria-label={`${label} h column`}
+                            value={row.hColumn ?? ''}
+                            onChange={(e) => handlePatch(row, { hColumn: e.target.value })}
+                            className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                          />
+                        ) : (
+                          row.hColumn || ''
+                        )}
+                      </td>
                     </>
+                  )}
+                  {(onRowSelect || onDeleteRow) && (
+                    <td className="px-4 py-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        {onRowSelect && row.sourceFileId && (
+                          <button
+                            type="button"
+                            onClick={() => handleViewSource(row)}
+                            className="text-xs text-indigo-600 hover:text-indigo-800"
+                          >
+                            View source
+                          </button>
+                        )}
+                        {onDeleteRow && (
+                          <button
+                            type="button"
+                            aria-label={`Delete ${label}`}
+                            onClick={() => onDeleteRow(row.rowId)}
+                            className="text-xs text-red-600 hover:text-red-800"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   )}
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {onRowSelect && (
-          <div className="border-t border-gray-100 bg-gray-50 px-4 py-2 text-[11px] text-gray-500">
-            Tip: click any row to highlight its source region in the viewer.
-          </div>
-        )}
       </div>
     </div>
   );

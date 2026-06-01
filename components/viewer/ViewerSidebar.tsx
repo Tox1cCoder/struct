@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DocumentViewer } from './DocumentViewer';
 import { FileSelector } from './FileSelector';
-import { ACCENT_CLASSES, ViewerAccent, ViewerFile, ViewerSelection } from './types';
+import { ACCENT_CLASSES, ViewerAccent, ViewerFile, ViewerSelection, ViewerSourceOption } from './types';
 
 interface ViewerSidebarProps {
   files: ViewerFile[];
@@ -57,9 +57,23 @@ export const ViewerSidebar: React.FC<ViewerSidebarProps> = ({
     (newPage: number) => {
       if (!selectedFile) return;
       const clamped = Math.min(Math.max(newPage, 1), Math.max(1, selectedFile.pageCount ?? 1));
-      onSelectionChange({ fileId: selectedFile.id, page: clamped });
+      onSelectionChange({ ...(selection ?? {}), fileId: selectedFile.id, page: clamped });
     },
-    [selectedFile, onSelectionChange],
+    [selectedFile, selection, onSelectionChange],
+  );
+
+  const handleAlternateSelect = useCallback(
+    (alt: ViewerSourceOption) => {
+      if (!selection) return;
+      onSelectionChange({
+        ...selection,
+        fileId: alt.fileId,
+        page: alt.page,
+        bbox: alt.bbox,
+        sourceRole: alt.sourceRole,
+      });
+    },
+    [selection, onSelectionChange],
   );
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -219,6 +233,32 @@ export const ViewerSidebar: React.FC<ViewerSidebarProps> = ({
           </div>
         )}
       </div>
+
+      {selection?.alternates && selection.alternates.length > 1 && (
+        <div className="border-b border-gray-100 bg-white px-3 py-2 flex flex-wrap gap-1">
+          {selection.alternates.map((alt) => {
+            const active =
+              alt.fileId === selection.fileId &&
+              (alt.sourceRole === selection.sourceRole);
+            return (
+              <button
+                key={`${alt.sourceRole}:${alt.fileId}`}
+                type="button"
+                aria-label={alt.label}
+                aria-pressed={active}
+                onClick={() => handleAlternateSelect(alt)}
+                className={`rounded border px-2 py-1 text-xs ${
+                  active
+                    ? `${colors.bgSoft} ${colors.text} border-current`
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {alt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="min-h-0 flex-1">
         {selectedFile ? (

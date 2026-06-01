@@ -33,6 +33,12 @@ export const getErrorMessage = (error: unknown, fallback = 'Processing failed') 
   return fallback;
 };
 
-export const logError = (context: string, error: unknown) => {
-  console.error(context, error);
+export const logError = (
+  context: string,
+  error: unknown,
+  options: { handled?: boolean } = {},
+) => {
+  if (!options.handled) {
+    console.error(context, error);
+  }
 };

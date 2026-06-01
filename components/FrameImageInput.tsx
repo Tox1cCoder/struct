@@ -111,6 +111,7 @@ export const FrameImageInput: React.FC<FrameImageInputProps> = ({
   return (
     <div className="space-y-3">
       <div
+        data-testid="frame-dropzone"
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}

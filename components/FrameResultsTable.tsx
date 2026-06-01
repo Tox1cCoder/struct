@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { BoundingBox, FrameData } from '../types';
+import { BoundingBox, EditableFrameData, FrameData } from '../types';
 
 interface RowSource {
   fileId: string;
@@ -8,19 +8,31 @@ interface RowSource {
 }
 
 interface FrameResultsTableProps {
-  data: FrameData[];
+  data: EditableFrameData[];
   selectedRowKey?: string | null;
   onRowSelect?: (rowKey: string, source: RowSource | null) => void;
+  onRowChange?: (rowId: string, patch: Partial<FrameData>) => void;
+  onAddRow?: () => void;
+  onDeleteRow?: (rowId: string) => void;
 }
 
-const rowKeyOf = (row: FrameData, index: number) => `${row.sourceFileId ?? ''}::${row.frameName}::${index}`;
+const rowLabelOf = (row: EditableFrameData) => row.frameName || row.rowId;
 
-export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data, selectedRowKey, onRowSelect }) => {
+export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({
+  data,
+  selectedRowKey,
+  onRowSelect,
+  onRowChange,
+  onAddRow,
+  onDeleteRow,
+}) => {
   const [exporting, setExporting] = useState(false);
 
   if (data.length === 0) {
     return null;
   }
+
+  const editable = Boolean(onRowChange);
 
   const handleExportExcel = () => {
     setExporting(true);
@@ -37,7 +49,7 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data, sele
         'St. Value',
       ];
 
-      const rows = data.map(row => [
+      const rows = data.map((row) => [
         row.frameName,
         row.b,
         row.h,
@@ -77,14 +89,18 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data, sele
     }
   };
 
-  const handleRowClick = (row: FrameData, index: number) => {
+  const handleViewSource = (row: EditableFrameData) => {
     if (!onRowSelect) return;
-    const key = rowKeyOf(row, index);
     if (!row.sourceFileId) {
-      onRowSelect(key, null);
+      onRowSelect(row.rowId, null);
       return;
     }
-    onRowSelect(key, { fileId: row.sourceFileId, bbox: row.bbox });
+    onRowSelect(row.rowId, { fileId: row.sourceFileId, bbox: row.bbox });
+  };
+
+  const handlePatch = (row: EditableFrameData, patch: Partial<FrameData>) => {
+    if (!onRowChange) return;
+    onRowChange(row.rowId, patch);
   };
 
   return (
@@ -96,29 +112,25 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data, sele
             {data.length} {data.length === 1 ? 'Frame' : 'Frames'}
           </span>
         </div>
-        <button
-          onClick={handleExportExcel}
-          disabled={exporting}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 transition-all disabled:opacity-50"
-        >
-          {exporting ? (
-            <>
-              <svg className="animate-spin h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Exporting...
-            </>
-          ) : (
-            <>
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-green-600">
-                <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
-                <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
-              </svg>
-              Export as Excel
-            </>
+        <div className="flex items-center gap-2">
+          {onAddRow && (
+            <button
+              type="button"
+              onClick={onAddRow}
+              aria-label="Add frame row"
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md hover:bg-amber-100"
+            >
+              Add frame row
+            </button>
           )}
-        </button>
+          <button
+            onClick={handleExportExcel}
+            disabled={exporting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 transition-all disabled:opacity-50"
+          >
+            {exporting ? 'Exporting...' : 'Export as Excel'}
+          </button>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left">
@@ -130,61 +142,172 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({ data, sele
               <th className="px-4 py-3 font-semibold border-b border-gray-200 bg-amber-50" colSpan={2}>上端筋</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200 bg-orange-50" colSpan={2}>下端筋</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200 bg-blue-50" colSpan={2}>St.</th>
-            </tr>
-            <tr className="bg-gray-50 text-gray-500 text-xs">
-              <th className="border-b border-gray-200"></th>
-              <th className="border-b border-gray-200"></th>
-              <th className="border-b border-gray-200"></th>
-              <th className="px-4 py-2 font-medium border-b border-gray-200 bg-amber-50/50">D</th>
-              <th className="px-4 py-2 font-medium border-b border-gray-200 bg-amber-50/50">Value</th>
-              <th className="px-4 py-2 font-medium border-b border-gray-200 bg-orange-50/50">D</th>
-              <th className="px-4 py-2 font-medium border-b border-gray-200 bg-orange-50/50">Value</th>
-              <th className="px-4 py-2 font-medium border-b border-gray-200 bg-blue-50/50">D</th>
-              <th className="px-4 py-2 font-medium border-b border-gray-200 bg-blue-50/50">Value</th>
+              {(onRowSelect || onDeleteRow) && (
+                <th className="px-4 py-3 font-semibold border-b border-gray-200">Actions</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {data.map((row, index) => {
-              const key = rowKeyOf(row, index);
-              const isSelected = key === selectedRowKey;
-              const clickable = Boolean(onRowSelect && row.sourceFileId);
+            {data.map((row) => {
+              const label = rowLabelOf(row);
+              const isSelected = row.rowId === selectedRowKey;
               return (
                 <tr
-                  key={key}
-                  onClick={() => handleRowClick(row, index)}
+                  key={row.rowId}
                   className={`transition-colors duration-150 ${
                     isSelected ? 'bg-amber-50 ring-1 ring-inset ring-amber-300' : 'hover:bg-gray-50'
-                  } ${clickable ? 'cursor-pointer' : ''}`}
+                  }`}
                 >
                   <td className={`px-4 py-3 text-sm font-bold text-gray-900 ${isSelected ? 'border-l-[3px] border-l-amber-500' : ''}`}>
-                    <span className={`inline-flex items-center gap-1 ${row.frameName.startsWith('FW') ? 'text-blue-700' : 'text-purple-700'}`}>
-                      {row.frameName}
-                      <span className={`text-[10px] px-1 py-0.5 rounded ${row.frameName.startsWith('FW') ? 'bg-blue-100' : 'bg-purple-100'}`}>
-                        {row.frameName.startsWith('FW') ? 'Wall' : 'Girder'}
+                    {editable ? (
+                      <input
+                        aria-label={`${label} frame name`}
+                        value={row.frameName}
+                        onChange={(e) => handlePatch(row, { frameName: e.target.value })}
+                        className="w-24 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      <span className={row.frameName.startsWith('FW') ? 'text-blue-700' : 'text-purple-700'}>
+                        {row.frameName}
                       </span>
-                      {row.bbox && (
-                        <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-500" title="Source bounding box available" />
-                      )}
-                    </span>
+                    )}
+                    {row.provenance === 'manual' && (
+                      <span className="ml-2 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                        Manual
+                      </span>
+                    )}
+                    {row.edited && row.provenance === 'extracted' && (
+                      <span className="ml-2 inline-block rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+                        Edited
+                      </span>
+                    )}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.b}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">{row.h}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 bg-amber-50/30 font-mono">{row.topRebarD}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 bg-amber-50/30 font-mono">{row.topRebarValue}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 bg-orange-50/30 font-mono">{row.bottomRebarD}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 bg-orange-50/30 font-mono">{row.bottomRebarValue}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 bg-blue-50/30 font-mono">{row.stirrupD || '-'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 bg-blue-50/30 font-mono">{row.stirrupValue || '-'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} B`}
+                        value={row.b}
+                        onChange={(e) => handlePatch(row, { b: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.b
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} H`}
+                        value={row.h}
+                        onChange={(e) => handlePatch(row, { h: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.h
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 bg-amber-50/30 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} top rebar D`}
+                        value={row.topRebarD}
+                        onChange={(e) => handlePatch(row, { topRebarD: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.topRebarD
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 bg-amber-50/30 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} top rebar value`}
+                        value={row.topRebarValue}
+                        onChange={(e) => handlePatch(row, { topRebarValue: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.topRebarValue
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 bg-orange-50/30 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} bottom rebar D`}
+                        value={row.bottomRebarD}
+                        onChange={(e) => handlePatch(row, { bottomRebarD: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.bottomRebarD
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 bg-orange-50/30 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} bottom rebar value`}
+                        value={row.bottomRebarValue}
+                        onChange={(e) => handlePatch(row, { bottomRebarValue: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.bottomRebarValue
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 bg-blue-50/30 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} stirrup D`}
+                        value={row.stirrupD ?? ''}
+                        onChange={(e) => handlePatch(row, { stirrupD: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.stirrupD || '-'
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 bg-blue-50/30 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} stirrup value`}
+                        value={row.stirrupValue ?? ''}
+                        onChange={(e) => handlePatch(row, { stirrupValue: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.stirrupValue || '-'
+                    )}
+                  </td>
+                  {(onRowSelect || onDeleteRow) && (
+                    <td className="px-4 py-3 text-sm">
+                      <div className="flex items-center gap-2">
+                        {onRowSelect && row.sourceFileId && (
+                          <button
+                            type="button"
+                            onClick={() => handleViewSource(row)}
+                            className="text-xs text-amber-700 hover:text-amber-900"
+                          >
+                            View source
+                          </button>
+                        )}
+                        {onDeleteRow && (
+                          <button
+                            type="button"
+                            aria-label={`Delete ${label}`}
+                            onClick={() => onDeleteRow(row.rowId)}
+                            className="text-xs text-red-600 hover:text-red-800"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {onRowSelect && (
-          <div className="border-t border-gray-100 bg-gray-50 px-4 py-2 text-[11px] text-gray-500">
-            Tip: click any row to highlight its source region in the viewer.
-          </div>
-        )}
       </div>
     </div>
   );

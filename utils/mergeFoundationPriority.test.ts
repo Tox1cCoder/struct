@@ -25,43 +25,6 @@ describe('buildFoundationPriorityText', () => {
     expect(result.text).toBe('F1: C3009');
   });
 
-  it('uses the foundation plan location as the viewer source for certified fallback entries', async () => {
-    const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
-
-    const result = buildFoundationPriorityText(
-      [
-        {
-          xAxis: 'X1',
-          yAxis: 'Y1',
-          columnType: 'C3009',
-          sourceFileId: 'certified-file',
-          page: 3,
-          bbox: { ymin: 100, xmin: 100, ymax: 200, xmax: 200 },
-        },
-      ],
-      [
-        {
-          foundation: 'F1',
-          xAxis: 'X1',
-          yAxis: 'Y1',
-          planColumnType: '',
-          sourceFileId: 'plan-file',
-          page: 7,
-          bbox: { ymin: 300, xmin: 400, ymax: 500, xmax: 600 },
-        },
-      ],
-    );
-
-    expect(result.entries[0]).toMatchObject({
-      foundation: 'F1',
-      columnType: 'C3009',
-      origin: 'certified',
-      sourceFileId: 'plan-file',
-      page: 7,
-      bbox: { ymin: 300, xmin: 400, ymax: 500, xmax: 600 },
-    });
-  });
-
   it('treats certified P codes the same as certified C codes', async () => {
     const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
 
@@ -74,22 +37,38 @@ describe('buildFoundationPriorityText', () => {
     expect(result.text).toBe('F1: P1');
   });
 
-  it('keeps multiple resolved lines for the same foundation when it maps to multiple coordinates', async () => {
+  it('renders one row per foundation with distinct codes resolved per location', async () => {
     const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
-
     const result = buildFoundationPriorityText(
       [
-        { xAxis: 'X1', yAxis: 'Y1', columnType: 'C3009' },
-        { xAxis: 'X2', yAxis: 'Y2', columnType: 'C3010' },
+        { xAxis: 'X1', yAxis: 'Y1', columnType: 'C3009', sourceFileId: 'left' },
+        { xAxis: 'X2', yAxis: 'Y2', columnType: 'C3010', sourceFileId: 'left' },
       ],
       [
-        { foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: '' },
-        { foundation: 'F1', xAxis: 'X2', yAxis: 'Y2', planColumnType: '' },
+        { foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: 'FC1', sourceFileId: 'right' },
+        { foundation: 'F1', xAxis: 'X2', yAxis: 'Y2', planColumnType: '', sourceFileId: 'right' },
       ],
     );
 
-    expect(result.lines).toEqual(['F1: C3009', 'F1: C3010']);
-    expect(result.text).toBe('F1: C3009\nF1: C3010');
+    expect(result.lines).toEqual(['F1: FC1, C3010']);
+    expect(result.rows[0].codes).toEqual(['FC1', 'C3010']);
+  });
+
+  it('retains plan and certified evidence for viewer switching', async () => {
+    const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
+    const result = buildFoundationPriorityText(
+      [{ xAxis: 'X1', yAxis: 'Y1', columnType: 'C3009', sourceFileId: 'left', page: 2 }],
+      [{ foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: '', sourceFileId: 'right', page: 1 }],
+    );
+
+    expect(result.rows[0].resolutions[0]).toMatchObject({
+      columnType: 'C3009',
+      method: 'certified-fallback',
+      locations: [{
+        plan: { fileId: 'right', page: 1 },
+        certified: { fileId: 'left', page: 2 },
+      }],
+    });
   });
 
   it('deduplicates identical resolved codes for the same foundation', async () => {

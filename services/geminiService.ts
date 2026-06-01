@@ -3,10 +3,15 @@ import {
   FileState,
   GoogleGenAI,
   Type,
-  type PartMediaResolutionLevel,
-  type ThinkingLevel,
 } from "@google/genai";
-import { CertifiedCoordinateData, ColumnReinforcementData, FoundationColumnData, FoundationPlanCoordinateData, FrameData } from "../types";
+import {
+  CertifiedCoordinateData,
+  ColumnReinforcementData,
+  FoundationColumnData,
+  FoundationPlanCoordinateData,
+  FrameData,
+  PriorityPipelineDiagnostics,
+} from "../types";
 import { parseBoundingBox, parsePage } from "../utils/boundingBox";
 import {
   normalizeCertifiedCoordinateRows,
@@ -16,15 +21,17 @@ import {
 import { logError } from "../utils/errorHandling";
 import {
   FOUNDATION_PRIORITY_API_VERSION,
-  FOUNDATION_PRIORITY_FALLBACK_MEDIA_RESOLUTION,
-  FOUNDATION_PRIORITY_FALLBACK_THINKING_LEVEL,
-  FOUNDATION_PRIORITY_MODEL,
   FOUNDATION_PRIORITY_POLL_INTERVAL_MS,
-  FOUNDATION_PRIORITY_PRIMARY_MEDIA_RESOLUTION,
-  FOUNDATION_PRIORITY_PRIMARY_THINKING_LEVEL,
   createFoundationPriorityContents,
   createFoundationPriorityGenerationConfig,
+  needsPriorityEscalation,
+  selectPriorityPass,
 } from "../utils/foundationPriorityGeminiConfig";
+import {
+  createPriorityDiagnostics,
+  finishStage,
+  markEscalated,
+} from "../utils/foundationPriorityDiagnostics";
 
 const SPATIAL_INSTRUCTION_PDF = `
 
@@ -607,118 +614,175 @@ const getFoundationPriorityClient = () => {
   return cachedFoundationPriorityClient;
 };
 
-const extractCoordinateDataFromPdf = async (
+const withActivePdf = async <T>(
+  ai: GoogleGenAI,
   file: File,
+  work: (active: ActiveGeminiPdfFile, uploadMs: number) => Promise<T>,
+): Promise<T> => {
+  const uploadStart = Date.now();
+  const active = await uploadPdfAndWaitUntilActive(ai, file);
+  const uploadMs = Date.now() - uploadStart;
+  try {
+    return await work(active, uploadMs);
+  } finally {
+    try {
+      await ai.files.delete({ name: active.name });
+    } catch (error) {
+      logError(`Unable to release uploaded Gemini file ${active.name}`, error);
+    }
+  }
+};
+
+const generateAgainstActivePdf = async (
+  ai: GoogleGenAI,
+  active: ActiveGeminiPdfFile,
   prompt: string,
   responseJsonSchema: object,
-  mediaResolution: PartMediaResolutionLevel,
-  thinkingLevel: ThinkingLevel,
+  pass: 'primary' | 'escalated',
 ) => {
+  const passConfig = selectPriorityPass(pass);
+  const filePart = createPartFromUri(active.uri, active.mimeType, passConfig.mediaResolution);
+  const response = await ai.models.generateContent({
+    model: passConfig.model,
+    contents: createFoundationPriorityContents(filePart, prompt),
+    config: createFoundationPriorityGenerationConfig(responseJsonSchema, passConfig.thinkingLevel),
+  });
+  const jsonText = response.text;
+  if (!jsonText) {
+    throw new Error('No data returned from the model.');
+  }
+  return parseStructuredArrayResponse(JSON.parse(jsonText));
+};
+
+interface PriorityExtractionResult<T> {
+  data: T[];
+  diagnostics: PriorityPipelineDiagnostics;
+}
+
+export const extractCertifiedCoordinateData = async (
+  file: File,
+): Promise<PriorityExtractionResult<CertifiedCoordinateData>> => {
   const ai = getFoundationPriorityClient();
+  const totalStart = Date.now();
+  let diagnostics = createPriorityDiagnostics(file.name, 'certified');
 
-  try {
-    const uploadedFile = await uploadPdfAndWaitUntilActive(ai, file);
-    const filePart = createPartFromUri(
-      uploadedFile.uri,
-      uploadedFile.mimeType,
-      mediaResolution,
-    );
+  const result = await withActivePdf(ai, file, async (active, uploadMs) => {
+    diagnostics = finishStage(diagnostics, 'upload', uploadMs);
 
-    const response = await ai.models.generateContent({
-      model: FOUNDATION_PRIORITY_MODEL,
-      contents: createFoundationPriorityContents(filePart, prompt),
-      config: createFoundationPriorityGenerationConfig(responseJsonSchema, thinkingLevel),
-    });
-
-    const jsonText = response.text;
-
-    if (!jsonText) {
-      throw new Error("No data returned from the model.");
-    }
-
-    return parseStructuredArrayResponse(JSON.parse(jsonText));
-  } catch (error) {
-    logError("Foundation Coordinate Extraction Error:", error);
-    throw error;
-  }
-};
-
-export const extractCertifiedCoordinateData = async (file: File): Promise<CertifiedCoordinateData[]> => {
-  const rawData = await extractCoordinateDataFromPdf(
-    file,
-    CERTIFIED_FOUNDATION_COORDINATE_PROMPT,
-    certifiedCoordinateResponseSchema,
-    FOUNDATION_PRIORITY_PRIMARY_MEDIA_RESOLUTION,
-    FOUNDATION_PRIORITY_PRIMARY_THINKING_LEVEL,
-  );
-
-  let validatedData = normalizeCertifiedCoordinateRows(rawData);
-
-  if (validatedData.length === 0) {
-    logError(
-      `Certified coordinate extraction returned unusable rows for ${file.name}. Primary raw sample:`,
-      summarizeRawCoordinateRows(rawData),
-    );
-
-    const fallbackRawData = await extractCoordinateDataFromPdf(
-      file,
-      CERTIFIED_FOUNDATION_COORDINATE_FALLBACK_PROMPT,
+    const primaryStart = Date.now();
+    const primaryRaw = await generateAgainstActivePdf(
+      ai,
+      active,
+      CERTIFIED_FOUNDATION_COORDINATE_PROMPT,
       certifiedCoordinateResponseSchema,
-      FOUNDATION_PRIORITY_FALLBACK_MEDIA_RESOLUTION,
-      FOUNDATION_PRIORITY_FALLBACK_THINKING_LEVEL,
+      'primary',
     );
+    diagnostics = finishStage(diagnostics, 'primaryGeneration', Date.now() - primaryStart);
 
-    validatedData = normalizeCertifiedCoordinateRows(fallbackRawData);
+    const primaryValidateStart = Date.now();
+    let validated = normalizeCertifiedCoordinateRows(primaryRaw);
+    diagnostics = finishStage(diagnostics, 'primaryValidation', Date.now() - primaryValidateStart);
 
-    if (validatedData.length === 0) {
+    if (needsPriorityEscalation('certified', validated.length, validated.length)) {
+      diagnostics = markEscalated(diagnostics, 'normalized-rows-empty');
       logError(
-        `Certified coordinate extraction still returned unusable rows for ${file.name}. Fallback raw sample:`,
-        summarizeRawCoordinateRows(fallbackRawData),
+        `Certified coordinate extraction returned unusable rows for ${file.name}. Primary raw sample:`,
+        summarizeRawCoordinateRows(primaryRaw),
       );
-      throw new Error('No valid certified coordinate data found in response. Gemini returned rows, but none contained a readable governing X/Y coordinate and certified C/P code.');
-    }
-  }
 
-  return validatedData;
+      const fallbackStart = Date.now();
+      const fallbackRaw = await generateAgainstActivePdf(
+        ai,
+        active,
+        CERTIFIED_FOUNDATION_COORDINATE_FALLBACK_PROMPT,
+        certifiedCoordinateResponseSchema,
+        'escalated',
+      );
+      diagnostics = finishStage(diagnostics, 'fallbackGeneration', Date.now() - fallbackStart);
+
+      const fallbackValidateStart = Date.now();
+      validated = normalizeCertifiedCoordinateRows(fallbackRaw);
+      diagnostics = finishStage(diagnostics, 'fallbackValidation', Date.now() - fallbackValidateStart);
+
+      if (validated.length === 0) {
+        logError(
+          `Certified coordinate extraction still returned unusable rows for ${file.name}. Fallback raw sample:`,
+          summarizeRawCoordinateRows(fallbackRaw),
+        );
+        throw new Error('No valid certified coordinate data found in response. Gemini returned rows, but none contained a readable governing X/Y coordinate and certified C/P code.');
+      }
+    }
+
+    return validated;
+  });
+
+  diagnostics = finishStage(diagnostics, 'total', Date.now() - totalStart);
+  return { data: result, diagnostics };
 };
 
-export const extractFoundationPlanCoordinateData = async (file: File): Promise<FoundationPlanCoordinateData[]> => {
-  const rawData = await extractCoordinateDataFromPdf(
-    file,
-    FOUNDATION_PLAN_COORDINATE_PROMPT,
-    foundationPlanCoordinateResponseSchema,
-    FOUNDATION_PRIORITY_PRIMARY_MEDIA_RESOLUTION,
-    FOUNDATION_PRIORITY_PRIMARY_THINKING_LEVEL,
-  );
+export const extractFoundationPlanCoordinateData = async (
+  file: File,
+): Promise<PriorityExtractionResult<FoundationPlanCoordinateData>> => {
+  const ai = getFoundationPriorityClient();
+  const totalStart = Date.now();
+  let diagnostics = createPriorityDiagnostics(file.name, 'plan');
 
-  let validatedData = normalizeFoundationPlanCoordinateRows(rawData);
+  const result = await withActivePdf(ai, file, async (active, uploadMs) => {
+    diagnostics = finishStage(diagnostics, 'upload', uploadMs);
 
-  if (validatedData.length === 0) {
-    logError(
-      `Foundation plan extraction returned unusable rows for ${file.name}. Primary raw sample:`,
-      summarizeRawCoordinateRows(rawData),
-    );
-
-    const fallbackRawData = await extractCoordinateDataFromPdf(
-      file,
-      FOUNDATION_PLAN_COORDINATE_FALLBACK_PROMPT,
+    const primaryStart = Date.now();
+    const primaryRaw = await generateAgainstActivePdf(
+      ai,
+      active,
+      FOUNDATION_PLAN_COORDINATE_PROMPT,
       foundationPlanCoordinateResponseSchema,
-      FOUNDATION_PRIORITY_FALLBACK_MEDIA_RESOLUTION,
-      FOUNDATION_PRIORITY_FALLBACK_THINKING_LEVEL,
+      'primary',
     );
+    diagnostics = finishStage(diagnostics, 'primaryGeneration', Date.now() - primaryStart);
 
-    validatedData = normalizeFoundationPlanCoordinateRows(fallbackRawData);
+    const primaryValidateStart = Date.now();
+    let validated = normalizeFoundationPlanCoordinateRows(primaryRaw);
+    diagnostics = finishStage(diagnostics, 'primaryValidation', Date.now() - primaryValidateStart);
 
-    if (validatedData.length === 0) {
-      logError(
-        `Foundation plan extraction still returned unusable rows for ${file.name}. Fallback raw sample:`,
-        summarizeRawCoordinateRows(fallbackRawData),
+    const resolvable = validated.filter((row) => row.xAxis && row.yAxis).length;
+    if (needsPriorityEscalation('plan', validated.length, resolvable)) {
+      diagnostics = markEscalated(
+        diagnostics,
+        validated.length === 0 ? 'normalized-rows-empty' : 'no-resolvable-locations',
       );
-      throw new Error('No valid foundation plan coordinate data found in response. Gemini returned rows, but none contained a readable foundation label with a governing X/Y coordinate.');
-    }
-  }
+      logError(
+        `Foundation plan extraction returned unusable rows for ${file.name}. Primary raw sample:`,
+        summarizeRawCoordinateRows(primaryRaw),
+      );
 
-  return validatedData;
+      const fallbackStart = Date.now();
+      const fallbackRaw = await generateAgainstActivePdf(
+        ai,
+        active,
+        FOUNDATION_PLAN_COORDINATE_FALLBACK_PROMPT,
+        foundationPlanCoordinateResponseSchema,
+        'escalated',
+      );
+      diagnostics = finishStage(diagnostics, 'fallbackGeneration', Date.now() - fallbackStart);
+
+      const fallbackValidateStart = Date.now();
+      validated = normalizeFoundationPlanCoordinateRows(fallbackRaw);
+      diagnostics = finishStage(diagnostics, 'fallbackValidation', Date.now() - fallbackValidateStart);
+
+      if (validated.length === 0) {
+        logError(
+          `Foundation plan extraction still returned unusable rows for ${file.name}. Fallback raw sample:`,
+          summarizeRawCoordinateRows(fallbackRaw),
+        );
+        throw new Error('No valid foundation plan coordinate data found in response. Gemini returned rows, but none contained a readable foundation label with a governing X/Y coordinate.');
+      }
+    }
+
+    return validated;
+  });
+
+  diagnostics = finishStage(diagnostics, 'total', Date.now() - totalStart);
+  return { data: result, diagnostics };
 };
 
 // Frame extraction prompt (FW and FG types)

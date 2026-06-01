@@ -1,4 +1,4 @@
-import { BoundingBox, ProcessingStatus } from '../../types';
+import { BoundingBox, PrioritySourceRole, ProcessingStatus } from '../../types';
 
 export type ViewerAccent = 'indigo' | 'amber' | 'cyan' | 'emerald' | 'violet';
 
@@ -14,11 +14,22 @@ export interface ViewerFile {
   group?: string;
 }
 
+export interface ViewerSourceOption {
+  fileId: string;
+  page?: number;
+  bbox?: BoundingBox;
+  sourceRole: PrioritySourceRole;
+  label: string;
+}
+
 export interface ViewerSelection {
   fileId: string;
   page?: number;
   bbox?: BoundingBox;
   rowKey?: string;
+  evidenceId?: string;
+  sourceRole?: PrioritySourceRole;
+  alternates?: ViewerSourceOption[];
 }
 
 export const ACCENT_CLASSES: Record<ViewerAccent, {

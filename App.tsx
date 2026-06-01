@@ -1,12 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { FoundationTextInput } from './components/FoundationTextInput';
 import { ResultsTable } from './components/ResultsTable';
 import { FrameImageInput } from './components/FrameImageInput';
 import { FrameResultsTable } from './components/FrameResultsTable';
 import { FoundationPriorityTextResult } from './components/FoundationPriorityTextResult';
-import { ReportTab } from './components/report/ReportTab';
-import { ViewerSidebar } from './components/viewer/ViewerSidebar';
+
+const ReportTab = React.lazy(() =>
+  import('./components/report/ReportTab').then((module) => ({ default: module.ReportTab })),
+);
+const ViewerSidebar = React.lazy(() =>
+  import('./components/viewer/ViewerSidebar').then((module) => ({ default: module.ViewerSidebar })),
+);
 import { ViewerAccent, ViewerFile, ViewerSelection } from './components/viewer/types';
 import {
   extractCertifiedCoordinateData,
@@ -17,15 +22,25 @@ import {
 import {
   BoundingBox,
   CertifiedCoordinateFileResult,
+  EditableExpandedReinforcementData,
+  EditableFrameData,
+  EditableRowsState,
+  ExpandedReinforcementData,
   FoundationColumnData,
   FileResult,
   FoundationPlanCoordinateFileResult,
+  FoundationPriorityEvidenceLocation,
+  FoundationPriorityWorkingRow,
   FrameFileResult,
   FrameData,
 } from './types';
 import { getErrorMessage, logError } from './utils/errorHandling';
 import { mergeReinforcementWithFoundation } from './utils/mergeData';
 import { buildFoundationPriorityText } from './utils/mergeFoundationPriority';
+import { hasActiveJobs } from './utils/fileJobs';
+import { StatusStrip } from './components/StatusStrip';
+import { buildColumnWorkingRows } from './utils/columnWorkingRows';
+import { addManualRow, deleteWorkingRow, reconcileExtractedRows, updateWorkingRow } from './utils/editableRows';
 
 type TabType = 'column' | 'frame' | 'priority' | 'report';
 
@@ -50,17 +65,18 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('column');
 
   const [reinfResults, setReinfResults] = useState<FileResult[]>([]);
-  const [isReinfProcessing, setIsReinfProcessing] = useState(false);
 
   const [foundationData, setFoundationData] = useState<FoundationColumnData[]>([]);
 
   const [frameResults, setFrameResults] = useState<FrameFileResult[]>([]);
-  const [isFrameProcessing, setIsFrameProcessing] = useState(false);
 
   const [certifiedResults, setCertifiedResults] = useState<CertifiedCoordinateFileResult[]>([]);
-  const [isCertifiedProcessing, setIsCertifiedProcessing] = useState(false);
   const [foundationPlanResults, setFoundationPlanResults] = useState<FoundationPlanCoordinateFileResult[]>([]);
-  const [isFoundationPlanProcessing, setIsFoundationPlanProcessing] = useState(false);
+
+  const isReinfProcessing = hasActiveJobs(reinfResults);
+  const isFrameProcessing = hasActiveJobs(frameResults);
+  const isCertifiedProcessing = hasActiveJobs(certifiedResults);
+  const isFoundationPlanProcessing = hasActiveJobs(foundationPlanResults);
 
   const [viewerSelection, setViewerSelection] = useState<ViewerSelection | null>(null);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
@@ -126,16 +142,105 @@ const App: React.FC = () => {
     [consolidatedReinfData, foundationData],
   );
 
+  const [columnRows, setColumnRows] = useState<EditableRowsState<EditableExpandedReinforcementData>>({
+    rows: [],
+    deletedSourceKeys: [],
+  });
+  const columnProposals = useMemo(
+    () => buildColumnWorkingRows(consolidatedReinfData, foundationData),
+    [consolidatedReinfData, foundationData],
+  );
+  useEffect(() => {
+    setColumnRows((state) => reconcileExtractedRows(state, columnProposals));
+  }, [columnProposals]);
+
+  const handleColumnRowChange = useCallback(
+    (rowId: string, patch: Partial<ExpandedReinforcementData>) => {
+      setColumnRows((state) => updateWorkingRow(state, rowId, patch));
+    },
+    [],
+  );
+  const handleColumnDeleteRow = useCallback((rowId: string) => {
+    setColumnRows((state) => deleteWorkingRow(state, rowId));
+  }, []);
+  const handleColumnAddRow = useCallback(() => {
+    setColumnRows((state) => {
+      const id = `column:manual:${Math.random().toString(36).slice(2, 9)}`;
+      return addManualRow(state, {
+        rowId: id,
+        sourceKey: id,
+        sourceFileIds: [],
+        provenance: 'manual',
+        edited: true,
+        foundation: '',
+        columnType: '',
+        dimensionWidth: '',
+        dimensionHeight: '',
+        mainReinforcementCount: '',
+        mainReinforcementSize: '',
+        hoopReinforcementSize: '',
+        hoopReinforcementSpacing: '',
+      });
+    });
+  }, []);
+
   const consolidatedFrameData = useMemo<FrameData[]>(
     () =>
       frameResults
-        .filter((r) => r.status === 'SUCCESS' && r.data)
-        .map((r) => ({
-          ...(r.data as FrameData),
-          sourceFileId: r.id,
-        })),
+        .filter((r) => r.status === 'SUCCESS')
+        .flatMap((r) => r.data.map((frame) => ({ ...frame, sourceFileId: r.id }))),
     [frameResults],
   );
+
+  const frameProposals = useMemo(() => {
+    return consolidatedFrameData.map((frame, index) => {
+      const sourceKey = `frame:${frame.sourceFileId ?? 'unknown'}:${index}:${frame.frameName}`;
+      return {
+        ...frame,
+        rowId: sourceKey,
+        sourceKey,
+        sourceFileIds: frame.sourceFileId ? [frame.sourceFileId] : [],
+        provenance: 'extracted' as const,
+        edited: false,
+      };
+    });
+  }, [consolidatedFrameData]);
+
+  const [frameRows, setFrameRows] = useState<EditableRowsState<EditableFrameData>>({
+    rows: [],
+    deletedSourceKeys: [],
+  });
+  useEffect(() => {
+    setFrameRows((state) => reconcileExtractedRows(state, frameProposals));
+  }, [frameProposals]);
+
+  const handleFrameRowChange = useCallback((rowId: string, patch: Partial<FrameData>) => {
+    setFrameRows((state) => updateWorkingRow(state, rowId, patch));
+  }, []);
+  const handleFrameDeleteRow = useCallback((rowId: string) => {
+    setFrameRows((state) => deleteWorkingRow(state, rowId));
+  }, []);
+  const handleFrameAddRow = useCallback(() => {
+    setFrameRows((state) => {
+      const id = `frame:manual:${Math.random().toString(36).slice(2, 9)}`;
+      return addManualRow(state, {
+        rowId: id,
+        sourceKey: id,
+        sourceFileIds: [],
+        provenance: 'manual',
+        edited: true,
+        frameName: '',
+        b: '',
+        h: '',
+        topRebarD: '',
+        topRebarValue: '',
+        bottomRebarD: '',
+        bottomRebarValue: '',
+        stirrupD: '',
+        stirrupValue: '',
+      });
+    });
+  }, []);
 
   const consolidatedCertifiedData = useMemo(
     () =>
@@ -170,6 +275,43 @@ const App: React.FC = () => {
     [consolidatedCertifiedData, consolidatedFoundationPlanData],
   );
 
+  const [priorityRows, setPriorityRows] = useState<EditableRowsState<FoundationPriorityWorkingRow>>({
+    rows: [],
+    deletedSourceKeys: [],
+  });
+  useEffect(() => {
+    setPriorityRows((state) => reconcileExtractedRows(state, foundationPriorityResult.rows));
+  }, [foundationPriorityResult]);
+  const priorityText = useMemo(
+    () => priorityRows.rows.map((row) => `${row.foundation}: ${row.codes.join(', ')}`).join('\n'),
+    [priorityRows.rows],
+  );
+
+  const handlePriorityRowChange = useCallback(
+    (rowId: string, patch: Pick<FoundationPriorityWorkingRow, 'foundation' | 'codes'>) => {
+      setPriorityRows((state) => updateWorkingRow(state, rowId, patch));
+    },
+    [],
+  );
+  const handlePriorityDeleteRow = useCallback((rowId: string) => {
+    setPriorityRows((state) => deleteWorkingRow(state, rowId));
+  }, []);
+  const handlePriorityAddRow = useCallback(() => {
+    setPriorityRows((state) => {
+      const id = `priority:manual:${Math.random().toString(36).slice(2, 9)}`;
+      return addManualRow(state, {
+        rowId: id,
+        sourceKey: id,
+        sourceFileIds: [],
+        provenance: 'manual',
+        edited: true,
+        foundation: '',
+        codes: [],
+        resolutions: [],
+      });
+    });
+  }, []);
+
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -193,7 +335,7 @@ const App: React.FC = () => {
         prev.map((r) => (r.id === id ? { ...r, status: 'SUCCESS', data } : r)),
       );
     } catch (err) {
-      logError(`Reinforcement extraction failed for ${file.name}`, err);
+      logError(`Reinforcement extraction failed for ${file.name}`, err, { handled: true });
       setReinfResults((prev) =>
         prev.map((r) => (r.id === id ? { ...r, status: 'ERROR', error: getErrorMessage(err) } : r)),
       );
@@ -203,7 +345,6 @@ const App: React.FC = () => {
   const handleReinfFilesSelect = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return;
-      setIsReinfProcessing(true);
       const newEntries: FileResult[] = files.map((file) => ({
         id: Math.random().toString(36).substring(7),
         fileName: file.name,
@@ -216,7 +357,6 @@ const App: React.FC = () => {
       await Promise.allSettled(
         newEntries.map((entry, index) => processReinfFile(files[index], entry.id)),
       );
-      setIsReinfProcessing(false);
     },
     [registerSourceUrl],
   );
@@ -230,24 +370,9 @@ const App: React.FC = () => {
     try {
       const data = await extractFrameData(base64, mimeType);
       if (data.length > 0) {
-        setFrameResults((prev) => {
-          const originalEntry = prev.find((r) => r.id === id);
-          const imagePreview = originalEntry?.imagePreview || '';
-          const updated = prev.map((r) =>
-            r.id === id ? { ...r, status: 'SUCCESS' as const, data: data[0] } : r,
-          );
-          if (data.length > 1) {
-            const additional: FrameFileResult[] = data.slice(1).map((frame, idx) => ({
-              id: `${id}-extra-${idx}`,
-              imagePreview,
-              status: 'SUCCESS' as const,
-              data: frame,
-              sourceMimeType: mimeType,
-            }));
-            return [...updated, ...additional];
-          }
-          return updated;
-        });
+        setFrameResults((prev) =>
+          prev.map((r) => (r.id === id ? { ...r, status: 'SUCCESS', data } : r)),
+        );
       } else {
         setFrameResults((prev) =>
           prev.map((r) =>
@@ -256,7 +381,7 @@ const App: React.FC = () => {
         );
       }
     } catch (err) {
-      logError(`Frame extraction failed for ${id}`, err);
+      logError(`Frame extraction failed for ${id}`, err, { handled: true });
       setFrameResults((prev) =>
         prev.map((r) => (r.id === id ? { ...r, status: 'ERROR', error: getErrorMessage(err) } : r)),
       );
@@ -270,19 +395,18 @@ const App: React.FC = () => {
         id,
         imagePreview: imageData.preview,
         status: 'PENDING',
-        data: null,
+        data: [],
         sourceMimeType: imageData.mimeType,
       };
       setFrameResults((prev) => [...prev, newEntry]);
-      setIsFrameProcessing(true);
       await processFrameImage(id, imageData.base64, imageData.mimeType);
-      setIsFrameProcessing(false);
     },
     [],
   );
 
   const handleFrameClear = useCallback(() => {
     setFrameResults([]);
+    setFrameRows({ rows: [], deletedSourceKeys: [] });
     setViewerSelection(null);
     setSelectedRowKey(null);
   }, []);
@@ -292,12 +416,12 @@ const App: React.FC = () => {
       prev.map((r) => (r.id === id ? { ...r, status: 'PROCESSING' } : r)),
     );
     try {
-      const data = await extractCertifiedCoordinateData(file);
+      const { data, diagnostics } = await extractCertifiedCoordinateData(file);
       setCertifiedResults((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, status: 'SUCCESS', data } : r)),
+        prev.map((r) => (r.id === id ? { ...r, status: 'SUCCESS', data, diagnostics } : r)),
       );
     } catch (err) {
-      logError(`Certified coordinate extraction failed for ${file.name}`, err);
+      logError(`Certified coordinate extraction failed for ${file.name}`, err, { handled: true });
       setCertifiedResults((prev) =>
         prev.map((r) => (r.id === id ? { ...r, status: 'ERROR', error: getErrorMessage(err) } : r)),
       );
@@ -307,7 +431,6 @@ const App: React.FC = () => {
   const handleCertifiedFilesSelect = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return;
-      setIsCertifiedProcessing(true);
       const newEntries: CertifiedCoordinateFileResult[] = files.map((file) => ({
         id: Math.random().toString(36).substring(7),
         fileName: file.name,
@@ -320,7 +443,6 @@ const App: React.FC = () => {
       await Promise.allSettled(
         newEntries.map((entry, index) => processCertifiedFile(files[index], entry.id)),
       );
-      setIsCertifiedProcessing(false);
     },
     [registerSourceUrl],
   );
@@ -330,12 +452,12 @@ const App: React.FC = () => {
       prev.map((r) => (r.id === id ? { ...r, status: 'PROCESSING' } : r)),
     );
     try {
-      const data = await extractFoundationPlanCoordinateData(file);
+      const { data, diagnostics } = await extractFoundationPlanCoordinateData(file);
       setFoundationPlanResults((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, status: 'SUCCESS', data } : r)),
+        prev.map((r) => (r.id === id ? { ...r, status: 'SUCCESS', data, diagnostics } : r)),
       );
     } catch (err) {
-      logError(`Foundation plan extraction failed for ${file.name}`, err);
+      logError(`Foundation plan extraction failed for ${file.name}`, err, { handled: true });
       setFoundationPlanResults((prev) =>
         prev.map((r) => (r.id === id ? { ...r, status: 'ERROR', error: getErrorMessage(err) } : r)),
       );
@@ -345,7 +467,6 @@ const App: React.FC = () => {
   const handleFoundationPlanFilesSelect = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return;
-      setIsFoundationPlanProcessing(true);
       const newEntries: FoundationPlanCoordinateFileResult[] = files.map((file) => ({
         id: Math.random().toString(36).substring(7),
         fileName: file.name,
@@ -358,7 +479,6 @@ const App: React.FC = () => {
       await Promise.allSettled(
         newEntries.map((entry, index) => processFoundationPlanFile(files[index], entry.id)),
       );
-      setIsFoundationPlanProcessing(false);
     },
     [registerSourceUrl],
   );
@@ -367,7 +487,7 @@ const App: React.FC = () => {
     revokeSourceUrls(reinfResults.map((r) => r.sourceUrl));
     setReinfResults([]);
     setFoundationData([]);
-    setIsReinfProcessing(false);
+    setColumnRows({ rows: [], deletedSourceKeys: [] });
     setViewerSelection(null);
     setSelectedRowKey(null);
   };
@@ -379,8 +499,7 @@ const App: React.FC = () => {
     ]);
     setCertifiedResults([]);
     setFoundationPlanResults([]);
-    setIsCertifiedProcessing(false);
-    setIsFoundationPlanProcessing(false);
+    setPriorityRows({ rows: [], deletedSourceKeys: [] });
     setViewerSelection(null);
     setSelectedRowKey(null);
   };
@@ -404,6 +523,37 @@ const App: React.FC = () => {
         page: source.page,
         bbox: source.bbox,
         rowKey,
+      });
+      setSidebarCollapsed(false);
+    },
+    [],
+  );
+
+  const handlePriorityEvidenceSelect = useCallback(
+    (evidence: FoundationPriorityEvidenceLocation) => {
+      const plan = evidence.plan;
+      if (!plan.fileId) return;
+      const alternates = [
+        { fileId: plan.fileId, page: plan.page, bbox: plan.bbox, sourceRole: 'plan' as const, label: '基礎伏図' },
+        ...(evidence.certified
+          ? [{
+              fileId: evidence.certified.fileId,
+              page: evidence.certified.page,
+              bbox: evidence.certified.bbox,
+              sourceRole: 'certified' as const,
+              label: '認定柱脚資料',
+            }]
+          : []),
+      ];
+      setSelectedRowKey(evidence.evidenceId);
+      setViewerSelection({
+        fileId: plan.fileId,
+        page: plan.page,
+        bbox: plan.bbox,
+        rowKey: evidence.evidenceId,
+        evidenceId: evidence.evidenceId,
+        sourceRole: 'plan',
+        alternates,
       });
       setSidebarCollapsed(false);
     },
@@ -436,23 +586,15 @@ const App: React.FC = () => {
       }));
     }
     if (activeTab === 'frame') {
-      const seen = new Set<string>();
-      return frameResults
-        .filter((r) => {
-          const baseId = r.id.split('-extra-')[0];
-          if (seen.has(baseId)) return false;
-          seen.add(baseId);
-          return true;
-        })
-        .map((r) => ({
-          id: r.id,
-          fileName: r.data?.frameName ?? `Pasted image ${r.id.slice(-4)}`,
-          status: r.status,
-          sourceUrl: r.imagePreview,
-          sourceMimeType: r.sourceMimeType ?? 'image/png',
-          itemCount: r.status === 'SUCCESS' && r.data ? 1 : 0,
-          error: r.error,
-        }));
+      return frameResults.map((r) => ({
+        id: r.id,
+        fileName: r.data[0]?.frameName ?? `Pasted image ${r.id.slice(-4)}`,
+        status: r.status,
+        sourceUrl: r.imagePreview,
+        sourceMimeType: r.sourceMimeType ?? 'image/png',
+        itemCount: r.status === 'SUCCESS' ? r.data.length : 0,
+        error: r.error,
+      }));
     }
     if (activeTab === 'report') return [];
     return [
@@ -583,7 +725,6 @@ const App: React.FC = () => {
                     </h3>
                     <FileUpload
                       onFilesSelect={handleReinfFilesSelect}
-                      disabled={isReinfProcessing}
                       title="Upload Reinforcement Docs"
                       description="Click to browse or drag & drop files here"
                       iconColor="indigo"
@@ -605,13 +746,16 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                {mergedData.length > 0 && (
+                {columnRows.rows.length > 0 && (
                   <div className="space-y-6 animate-fade-in-up">
                     <ResultsTable
-                      data={mergedData}
+                      data={columnRows.rows}
                       hasFoundationData={foundationData.length > 0}
                       selectedRowKey={selectedRowKey}
                       onRowSelect={handleRowSelect}
+                      onRowChange={handleColumnRowChange}
+                      onAddRow={handleColumnAddRow}
+                      onDeleteRow={handleColumnDeleteRow}
                     />
                     <InfoBanner accent="indigo">
                       <strong>Note:</strong> Data extracted based on "Zone II" (Ⅱゾーン) priority.
@@ -645,17 +789,19 @@ const App: React.FC = () => {
                     results={frameResults}
                     onImagePaste={handleFrameImagePaste}
                     onClear={handleFrameClear}
-                    disabled={isFrameProcessing}
                     isActiveTab={activeTab === 'frame'}
                   />
                 </div>
 
-                {consolidatedFrameData.length > 0 && (
+                {frameRows.rows.length > 0 && (
                   <div className="space-y-6 animate-fade-in-up">
                     <FrameResultsTable
-                      data={consolidatedFrameData}
+                      data={frameRows.rows}
                       selectedRowKey={selectedRowKey}
                       onRowSelect={handleRowSelect}
+                      onRowChange={handleFrameRowChange}
+                      onAddRow={handleFrameAddRow}
+                      onDeleteRow={handleFrameDeleteRow}
                     />
                     <InfoBanner accent="amber">
                       <strong>Note:</strong> Frame data extracted from images. FW = Foundation Wall (布基礎), FG =
@@ -689,7 +835,6 @@ const App: React.FC = () => {
                     </h3>
                     <FileUpload
                       onFilesSelect={handleCertifiedFilesSelect}
-                      disabled={isCertifiedProcessing}
                       title="Upload Certified Column Base PDFs"
                       description="Click to browse or drag & drop PDF files here"
                       iconColor="indigo"
@@ -699,7 +844,14 @@ const App: React.FC = () => {
                       allowPaste={false}
                       fileTypesLabel="PDF only"
                     />
-                    <StatusStrip results={certifiedResults} accent="indigo" />
+                    <StatusStrip
+                      results={certifiedResults.map((r) => ({
+                        ...r,
+                        durationMs: r.diagnostics?.stages.totalMs,
+                        passUsed: r.diagnostics?.passUsed,
+                      }))}
+                      accent="indigo"
+                    />
                   </div>
 
                   <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
@@ -709,7 +861,6 @@ const App: React.FC = () => {
                     </h3>
                     <FileUpload
                       onFilesSelect={handleFoundationPlanFilesSelect}
-                      disabled={isFoundationPlanProcessing}
                       title="Upload Foundation Plan PDFs"
                       description="Click to browse or drag & drop PDF files here"
                       iconColor="emerald"
@@ -719,17 +870,27 @@ const App: React.FC = () => {
                       allowPaste={false}
                       fileTypesLabel="PDF only"
                     />
-                    <StatusStrip results={foundationPlanResults} accent="emerald" />
+                    <StatusStrip
+                      results={foundationPlanResults.map((r) => ({
+                        ...r,
+                        durationMs: r.diagnostics?.stages.totalMs,
+                        passUsed: r.diagnostics?.passUsed,
+                      }))}
+                      accent="emerald"
+                    />
                   </div>
                 </div>
 
-                {foundationPriorityResult.entries.length > 0 && (
+                {priorityRows.rows.length > 0 && (
                   <div className="space-y-6 animate-fade-in-up">
                     <FoundationPriorityTextResult
-                      text={foundationPriorityResult.text}
-                      entries={foundationPriorityResult.entries}
+                      text={priorityText}
+                      rows={priorityRows.rows}
                       selectedRowKey={selectedRowKey}
-                      onRowSelect={handleRowSelect}
+                      onRowChange={handlePriorityRowChange}
+                      onAddRow={handlePriorityAddRow}
+                      onDeleteRow={handlePriorityDeleteRow}
+                      onEvidenceSelect={handlePriorityEvidenceSelect}
                     />
                     <InfoBanner accent="cyan">
                       <strong>Rule:</strong> The app matches both PDFs by canonical X/Y placement tokens for each
@@ -744,24 +905,28 @@ const App: React.FC = () => {
           )}
 
           {activeTab === 'report' && (
-            <ReportTab data={mergedData} />
+            <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading report…</div>}>
+              <ReportTab data={columnRows.rows} />
+            </Suspense>
           )}
         </main>
 
-        <ViewerSidebar
-          files={viewerFiles}
-          selection={viewerSelection}
-          onSelectionChange={(sel) => {
-            setViewerSelection(sel);
-            if (!sel || !sel.rowKey) setSelectedRowKey(sel?.rowKey ?? null);
-          }}
-          accent={accent}
-          collapsed={sidebarCollapsed}
-          onCollapsedChange={setSidebarCollapsed}
-          width={sidebarWidth}
-          onWidthChange={setSidebarWidth}
-          onPageCountResolved={handlePageCountResolved}
-        />
+        <Suspense fallback={<aside className="w-12 border-l border-gray-200 bg-white" />}>
+          <ViewerSidebar
+            files={viewerFiles}
+            selection={viewerSelection}
+            onSelectionChange={(sel) => {
+              setViewerSelection(sel);
+              if (!sel || !sel.rowKey) setSelectedRowKey(sel?.rowKey ?? null);
+            }}
+            accent={accent}
+            collapsed={sidebarCollapsed}
+            onCollapsedChange={setSidebarCollapsed}
+            width={sidebarWidth}
+            onWidthChange={setSidebarWidth}
+            onPageCountResolved={handlePageCountResolved}
+          />
+        </Suspense>
       </div>
     </div>
   );
@@ -790,56 +955,6 @@ const TabButton: React.FC<TabButtonProps> = ({ active, accent, onClick, children
     >
       <span className="flex items-center gap-2">{children}</span>
     </button>
-  );
-};
-
-interface StatusStripProps {
-  results: { status: string; error?: string }[];
-  accent: 'indigo' | 'amber' | 'cyan' | 'emerald';
-}
-
-const StatusStrip: React.FC<StatusStripProps> = ({ results, accent }) => {
-  if (results.length === 0) return null;
-  const success = results.filter((r) => r.status === 'SUCCESS').length;
-  const processing = results.filter((r) => r.status === 'PROCESSING' || r.status === 'PENDING').length;
-  const errors = results.filter((r) => r.status === 'ERROR');
-  const errorCount = errors.length;
-  const accentText: Record<typeof accent, string> = {
-    indigo: 'text-indigo-700',
-    amber: 'text-amber-700',
-    cyan: 'text-cyan-700',
-    emerald: 'text-emerald-700',
-  };
-  return (
-    <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-      <div className="flex flex-wrap items-center gap-3 text-xs">
-        <span className={`font-medium ${accentText[accent]}`}>{results.length} files</span>
-        <span className="flex items-center gap-1 text-green-600">
-          <span className="h-2 w-2 rounded-full bg-green-500" />
-          {success} ok
-        </span>
-        {processing > 0 && (
-          <span className="flex items-center gap-1 text-amber-600">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
-            {processing} processing
-          </span>
-        )}
-        {errorCount > 0 && (
-          <span className="flex items-center gap-1 text-red-600">
-            <span className="h-2 w-2 rounded-full bg-red-500" />
-            {errorCount} failed
-          </span>
-        )}
-      </div>
-      {errorCount > 0 && (
-        <ul className="mt-2 space-y-0.5 text-[11px] text-red-600">
-          {errors.slice(0, 3).map((r, i) => (
-            <li key={i} className="truncate">{r.error ?? 'Unknown error'}</li>
-          ))}
-          {errorCount > 3 && <li>+ {errorCount - 3} more…</li>}
-        </ul>
-      )}
-    </div>
   );
 };
 
