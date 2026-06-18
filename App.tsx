@@ -758,7 +758,7 @@ const App: React.FC = () => {
                       onDeleteRow={handleColumnDeleteRow}
                     />
                     <InfoBanner accent="indigo">
-                      <strong>Note:</strong> Data extracted based on "Zone II" (Ⅱゾーン) priority.
+                      <strong>Note:</strong> Data extracted based on "Zone I" (Ⅰゾーン) priority.
                       {foundationData.length > 0 && ' Foundation-Column relationships have been linked.'}{' '}
                       Always verify AI-extracted engineering data against original documents.
                     </InfoBanner>

@@ -101,12 +101,12 @@ Extract the Column Dimensions (柱形 or B×D), Main Reinforcement (主筋), and
 
 3.  **Extract Data (Priority Rule):**
     *   **Column Dimensions:** Look for fields labeled "柱形(mm)", "柱形断面", "B×D", or similar dimension specifications. Extract the dimensions (e.g., "1,400×1,400" or "770×770"). If dimensions contain text in parentheses like "柱形(mm)", ignore the parentheses content and extract only the dimension values.
-    *   Look for the column header **"Ⅱゾーンの場合"** (Zone II Case).
-        *   **Priority:** You must extract values from the "Ⅱゾーンの場合" column if it exists.
-        *   **Fallback:** Only if "Ⅱゾーンの場合" is completely absent, use the values from "Ⅰゾーンの場合".
+    *   Look for the column header **"Ⅰゾーンの場合"** (Zone I Case).
+        *   **Priority:** You must extract values from the "Ⅰゾーンの場合" column if it exists.
+        *   **Fallback:** Only if "Ⅰゾーンの場合" is completely absent, use the values from "Ⅱゾーンの場合".
     *   Extract the value for **"基礎柱形主筋"** (Main Reinforcement) or "主筋" and map it to "主筋".
     *   Extract the value for **"帯筋"** (Hoop Reinforcement) or "HOOP" and map it to "帯筋".
-    *   *Note:* If the table has rows for "Corner/Side" (側・隅柱用) and "Center" (中柱用), check if the values differ. If they are the same, extract the single value. If they differ, list the "Corner/Side" value. (In these specific documents, Zone II values usually match for both rows).
+    *   *Note:* If the table has rows for "Corner/Side" (側・隅柱用) and "Center" (中柱用), check if the values differ. If they are the same, extract the single value. If they differ, list the "Corner/Side" value. (In these specific documents, Zone I values usually match for both rows).
 
 **Constraints:**
 *   Ignore page headers/footers irrelevant to the specific reinforcement data.
