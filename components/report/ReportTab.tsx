@@ -57,6 +57,7 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
   const [config, setConfig] = useState<TemplateMappingConfig | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Build mode state
@@ -123,6 +124,7 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
   const handleExportFilled = () => {
     if (!fileBytes || !config) return;
     setExporting(true);
+    setExportError(null);
     try {
       // Fill via ZIP + XML patching — styles.xml and all other files are passed through unchanged
       const resultBytes = fillTemplate(fileBytes, data, config);
@@ -135,6 +137,13 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
       a.download = `${baseName}_filled.${ext}`;
       a.click();
       URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Template export failed:', err);
+      setExportError(
+        err instanceof Error
+          ? `Export failed: ${err.message}`
+          : 'Export failed. The template may be an unsupported format (only .xlsx/.xlsm are supported).',
+      );
     } finally {
       setExporting(false);
     }
@@ -149,8 +158,12 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
   const handleBuildExport = () => {
     if (!buildReportData) return;
     setBuildExporting(true);
+    setExportError(null);
     try {
       exportBuildReport(buildReportData, template.name);
+    } catch (err) {
+      console.error('Build export failed:', err);
+      setExportError(err instanceof Error ? `Export failed: ${err.message}` : 'Export failed.');
     } finally {
       setBuildExporting(false);
     }
@@ -369,6 +382,11 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
                       )}
                     </button>
                   </div>
+                  {exportError && (
+                    <p role="alert" className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                      {exportError}
+                    </p>
+                  )}
                   <ReportGrid data={uploadPreviewData} />
                 </div>
               ) : (
@@ -423,6 +441,11 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
                 </button>
               )}
             </div>
+            {exportError && mode === 'build' && (
+              <p role="alert" className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                {exportError}
+              </p>
+            )}
           </div>
 
           {showEditor && (

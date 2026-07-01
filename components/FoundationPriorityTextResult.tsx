@@ -73,7 +73,13 @@ export const FoundationPriorityTextResult: React.FC<FoundationPriorityTextResult
       <div className="p-3 space-y-2">
         {rows.map((row) => {
           const isExpanded = expanded[row.rowId] ?? false;
-          const isSelected = row.sourceKey === selectedRowKey;
+          // Evidence clicks set the shared selection key to an evidenceId (e.g. "F1:X1:Y1"),
+          // not the row's sourceKey ("priority:F1"), so match against both to keep the row highlighted.
+          const isSelected =
+            row.sourceKey === selectedRowKey ||
+            row.resolutions.some((res) =>
+              res.locations.some((loc) => loc.evidenceId === selectedRowKey),
+            );
           const label = row.foundation || row.rowId;
 
           return (

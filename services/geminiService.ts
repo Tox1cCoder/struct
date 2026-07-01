@@ -83,7 +83,7 @@ const bboxSchemaJson = {
 };
 
 // User provided prompt text for Column Reinforcement extraction
-const REINFORCEMENT_SYSTEM_PROMPT = `
+export const REINFORCEMENT_SYSTEM_PROMPT = `
 You are a data extraction assistant specializing in structural engineering documents.
 
 **Goal:**
@@ -100,13 +100,13 @@ Extract the Column Dimensions (柱形 or B×D), Main Reinforcement (主筋), and
     *   Find the table titled **"基礎柱形設計例"** (Foundation Column Design Example) on the page, or look for tables with headers like "符号", "断面", "B×D", "主筋", "帯筋", "HOOP".
 
 3.  **Extract Data (Priority Rule):**
-    *   **Column Dimensions:** Look for fields labeled "柱形(mm)", "柱形断面", "B×D", or similar dimension specifications. Extract the dimensions (e.g., "1,400×1,400" or "770×770"). If dimensions contain text in parentheses like "柱形(mm)", ignore the parentheses content and extract only the dimension values.
-    *   Look for the column header **"Ⅰゾーンの場合"** (Zone I Case).
-        *   **Priority:** You must extract values from the "Ⅰゾーンの場合" column if it exists.
+    *   **Column selection (which zone):** Look for the column header **"Ⅰゾーンの場合"** (Zone I Case).
+        *   **Priority:** You MUST read values from the "Ⅰゾーンの場合" column whenever it exists. Apply this to EVERY value you take from the "基礎柱形設計例" table — 柱形, 基礎柱形主筋, and 帯筋 — not just the reinforcement.
         *   **Fallback:** Only if "Ⅰゾーンの場合" is completely absent, use the values from "Ⅱゾーンの場合".
-    *   Extract the value for **"基礎柱形主筋"** (Main Reinforcement) or "主筋" and map it to "主筋".
-    *   Extract the value for **"帯筋"** (Hoop Reinforcement) or "HOOP" and map it to "帯筋".
-    *   *Note:* If the table has rows for "Corner/Side" (側・隅柱用) and "Center" (中柱用), check if the values differ. If they are the same, extract the single value. If they differ, list the "Corner/Side" value. (In these specific documents, Zone I values usually match for both rows).
+    *   **Row selection (which row):** If the table has separate rows for "Corner/Side" (側・隅柱用) and "Center" (中柱用), always extract the **"側・隅柱用"** (Corner/Side) row. If only one row exists, use that row. Do not assume the rows are identical — read the 側・隅柱用 row explicitly.
+    *   **Column Dimensions:** Look for fields labeled "柱形(mm)", "柱形断面", "B×D", or similar dimension specifications. If the dimension appears in the "基礎柱形設計例" table, take it from the selected Ⅰゾーン / 側・隅柱用 cell. Extract the dimensions (e.g., "1,400×1,400" or "770×770"). If dimensions contain text in parentheses like "柱形(mm)", ignore the parentheses content and extract only the dimension values.
+    *   Extract the value for **"基礎柱形主筋"** (Main Reinforcement) or "主筋" from the selected Ⅰゾーン / 側・隅柱用 cell and map it to "主筋".
+    *   Extract the value for **"帯筋"** (Hoop Reinforcement) or "HOOP" from the selected Ⅰゾーン / 側・隅柱用 cell and map it to "帯筋".
 
 **Constraints:**
 *   Ignore page headers/footers irrelevant to the specific reinforcement data.
@@ -300,9 +300,8 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
     *   Example: "24-D25 (SD345)" should become "24-D25".
     *   Example: "D13@100 (SD295)" should become "D13@100".
 
-    **IMPORTANT OVERRIDE:**
-    Ignore the "Output Format" instruction in the text above regarding Markdown.
-    Instead, strictly output a valid JSON array based on the schema provided.
+    **OUTPUT FORMAT:**
+    Strictly output a valid JSON array based on the schema provided. Do not wrap it in Markdown fences or add commentary.
     ${mimeType === 'application/pdf' ? SPATIAL_INSTRUCTION_PDF : SPATIAL_INSTRUCTION_IMAGE}
   `;
 
@@ -467,16 +466,39 @@ export const extractFoundationColumnData = async (base64Data: string, mimeType: 
       throw new Error("No data returned from the model.");
     }
 
-    const rawData = JSON.parse(jsonText) as FoundationColumnData[];
+    let rawData: any;
+    try {
+      rawData = JSON.parse(jsonText);
+    } catch (parseError) {
+      console.error("JSON Parse Error:", parseError);
+      console.error("Raw response text:", jsonText);
+      throw new Error(`Failed to parse JSON response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+    }
+
+    if (!Array.isArray(rawData)) {
+      if (typeof rawData === 'object' && rawData !== null) {
+        rawData = [rawData];
+      } else {
+        throw new Error(`Invalid response format - expected array, got ${typeof rawData}`);
+      }
+    }
 
     // Post-processing: Clean foundation labels (remove SGL notes and parentheses)
     const cleanFoundation = (val: string) => val.replace(/\s*[\(（].*?[\)）]/g, '').trim();
 
-    return rawData.map(item => ({
-      ...item,
-      foundation: cleanFoundation(item.foundation),
-      columnType: item.columnType.trim(),
-    }));
+    return rawData
+      .filter((item: any): item is FoundationColumnData => {
+        if (typeof item?.foundation !== 'string' || typeof item?.columnType !== 'string') {
+          console.warn('Skipping invalid foundation-column data:', item);
+          return false;
+        }
+        return true;
+      })
+      .map((item: FoundationColumnData) => ({
+        ...item,
+        foundation: cleanFoundation(item.foundation),
+        columnType: item.columnType.trim(),
+      }));
 
   } catch (error) {
     logError("Foundation-Column Extraction Error:", error);

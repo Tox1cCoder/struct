@@ -42,8 +42,9 @@ export function parseSheetPreview(
   maxRows = 60,
   maxCols = 30,
 ): (string | null)[][] {
-  const ws = workbook.Sheets[workbook.SheetNames[sheetIndex]];
-  if (!ws['!ref']) return [];
+  const safeIndex = Math.min(Math.max(sheetIndex, 0), workbook.SheetNames.length - 1);
+  const ws = workbook.Sheets[workbook.SheetNames[safeIndex]];
+  if (!ws || !ws['!ref']) return [];
   const range = XLSX.utils.decode_range(ws['!ref']);
   const rows: (string | null)[][] = [];
   for (let r = range.s.r; r <= Math.min(range.e.r, range.s.r + maxRows - 1); r++) {
@@ -66,8 +67,9 @@ export function autoDetectConfig(
   sheetIndex: number,
   knownFoundations: string[],
 ): TemplateMappingConfig {
-  const ws = workbook.Sheets[workbook.SheetNames[sheetIndex]];
-  const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1');
+  const safeIndex = Math.min(Math.max(sheetIndex, 0), workbook.SheetNames.length - 1);
+  const ws = workbook.Sheets[workbook.SheetNames[safeIndex]];
+  const range = XLSX.utils.decode_range(ws?.['!ref'] ?? 'A1');
   const foundationSet = new Set(knownFoundations.map((f) => f.toUpperCase()));
 
   let headerRow = 1;
