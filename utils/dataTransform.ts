@@ -36,6 +36,13 @@ export function parseDimensions(value: string): { width: string; height: string 
   if (match) {
     return { width: match[1].replace(/,/g, ''), height: match[2].replace(/,/g, '') };
   }
+
+  const squareMatch = value.match(/^([\d,]+)$/);
+  if (squareMatch) {
+    const side = squareMatch[1].replace(/,/g, '');
+    return { width: side, height: side };
+  }
+
   // Fallback: return original value in width only
   return { width: value, height: '' };
 }
