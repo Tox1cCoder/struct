@@ -75,8 +75,6 @@ const getFirstBoolean = (record: Record<string, unknown>, keys: string[]) => {
   return undefined;
 };
 
-const isHighlightedAliasCode = (value: string) => /^(?:C|P)[A-Z0-9]+$/.test(value);
-
 const getAxisLocatorFromText = (value: unknown, axisPrefix: 'X' | 'Y') => {
   const text = cleanAxisText(value);
 
@@ -107,13 +105,13 @@ const getAxisLocatorFromText = (value: unknown, axisPrefix: 'X' | 'Y') => {
 const getAxisPair = (record: Record<string, unknown>) => {
   const coordinateRecord = asRecord(record.coordinate) ?? asRecord(record.gridCoordinate);
   const xAxis = normalizeAxisLocatorToken(
-    getFirstString(record, ['xAxis', 'x', 'gridX', 'axisX', 'xGrid', 'xCoordinate']) ||
-      getFirstString(coordinateRecord ?? {}, ['xAxis', 'x', 'gridX', 'axisX']),
+    getFirstString(record, ['xAxis', 'x_axis', 'x', 'gridX', 'grid_x', 'axisX', 'axis_x', 'xGrid', 'x_grid', 'xCoordinate', 'x_coordinate']) ||
+      getFirstString(coordinateRecord ?? {}, ['xAxis', 'x_axis', 'x', 'gridX', 'grid_x', 'axisX', 'axis_x']),
     'X',
   );
   const yAxis = normalizeAxisLocatorToken(
-    getFirstString(record, ['yAxis', 'y', 'gridY', 'axisY', 'yGrid', 'yCoordinate']) ||
-      getFirstString(coordinateRecord ?? {}, ['yAxis', 'y', 'gridY', 'axisY']),
+    getFirstString(record, ['yAxis', 'y_axis', 'y', 'gridY', 'grid_y', 'axisY', 'axis_y', 'yGrid', 'y_grid', 'yCoordinate', 'y_coordinate']) ||
+      getFirstString(coordinateRecord ?? {}, ['yAxis', 'y_axis', 'y', 'gridY', 'grid_y', 'axisY', 'axis_y']),
     'Y',
   );
 
@@ -164,8 +162,11 @@ export const normalizeCertifiedCoordinateRows = (rawData: unknown[]): CertifiedC
             'columnCode',
             'column',
             'code',
+            'type',
             'cCode',
+            'c_code',
             'certifiedColumnType',
+            'certified_column_type',
           ]),
         );
 
@@ -201,18 +202,25 @@ export const normalizeFoundationPlanCoordinateRows = (rawData: unknown[]): Found
         const foundation = cleanLabel(
           getFirstString(record, [
             'foundation',
+            'foundation_label',
             'foundationLabel',
             'foundationType',
+            'foundation_type',
             'foundationCode',
+            'foundation_code',
           ]),
         );
         const planColumnType = cleanLabel(
           getFirstString(record, [
             'planColumnType',
+            'plan_column_type',
             'fcCode',
+            'fc_code',
             'columnType',
+            'column_type',
             'code',
             'visibleCode',
+            'visible_code',
           ]),
         );
         const isHighlighted = getFirstBoolean(record, [
@@ -232,12 +240,9 @@ export const normalizeFoundationPlanCoordinateRows = (rawData: unknown[]): Found
           ]),
         );
 
-        if (!foundation || !xAxis || !yAxis) {
+        if (!foundation) {
           return null;
         }
-
-        const normalizedPlanColumnType =
-          isHighlightedAliasCode(planColumnType) && isHighlighted !== true ? '' : planColumnType;
 
         const page = parsePage(record.page);
         const bbox = parseBoundingBox(record.bbox);
@@ -246,7 +251,7 @@ export const normalizeFoundationPlanCoordinateRows = (rawData: unknown[]): Found
           foundation,
           xAxis,
           yAxis,
-          planColumnType: normalizedPlanColumnType,
+          planColumnType,
           ...(typeof isHighlighted === 'boolean' ? { isHighlighted } : {}),
           ...(highlightColor ? { highlightColor } : {}),
           ...(page !== undefined ? { page } : {}),

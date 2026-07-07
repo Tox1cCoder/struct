@@ -283,7 +283,10 @@ const App: React.FC = () => {
     setPriorityRows((state) => reconcileExtractedRows(state, foundationPriorityResult.rows));
   }, [foundationPriorityResult]);
   const priorityText = useMemo(
-    () => priorityRows.rows.map((row) => `${row.foundation}: ${row.codes.join(', ')}`).join('\n'),
+    () =>
+      priorityRows.rows
+        .map((row) => (row.codes.length > 0 ? `${row.foundation}: ${row.codes.join(', ')}` : `${row.foundation}:`))
+        .join('\n'),
     [priorityRows.rows],
   );
 
@@ -629,6 +632,11 @@ const App: React.FC = () => {
   const hasFrameResults = frameResults.length > 0;
   const hasPrioritySourceResults = certifiedResults.length > 0 || foundationPlanResults.length > 0;
   const isPriorityProcessing = isCertifiedProcessing || isFoundationPlanProcessing;
+  const hasSuccessfulCertifiedResults = certifiedResults.some((r) => r.status === 'SUCCESS');
+  const hasSuccessfulFoundationPlanResults = foundationPlanResults.some((r) => r.status === 'SUCCESS');
+  const shouldShowPriorityResult =
+    priorityRows.rows.length > 0 ||
+    (!isPriorityProcessing && hasSuccessfulCertifiedResults && hasSuccessfulFoundationPlanResults);
 
   return (
     <div className="flex h-screen flex-col bg-gray-50">
@@ -881,7 +889,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                {priorityRows.rows.length > 0 && (
+                {shouldShowPriorityResult && (
                   <div className="space-y-6 animate-fade-in-up">
                     <FoundationPriorityTextResult
                       text={priorityText}

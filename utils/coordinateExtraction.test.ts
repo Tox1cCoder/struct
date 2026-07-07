@@ -22,6 +22,16 @@ describe('normalizeCertifiedCoordinateRows', () => {
     ]);
   });
 
+  it('salvages snake_case axes and type from Gemini certified rows', () => {
+    expect(
+      normalizeCertifiedCoordinateRows([
+        { type: 'C1', x_axis: 'X3', y_axis: 'Y2' },
+      ]),
+    ).toEqual([
+      { xAxis: 'X3', yAxis: 'Y2', columnType: 'C1' },
+    ]);
+  });
+
   it('normalizes half-grid coordinates into between-line locators', () => {
     expect(
       normalizeCertifiedCoordinateRows([
@@ -57,6 +67,21 @@ describe('normalizeFoundationPlanCoordinateRows', () => {
     ]);
   });
 
+  it('salvages snake_case field names from Gemini foundation plan rows', () => {
+    expect(
+      normalizeFoundationPlanCoordinateRows([
+        {
+          foundation_label: 'F1',
+          x_axis: 'X2',
+          y_axis: 'Y5',
+          plan_column_type: 'FC1',
+        },
+      ]),
+    ).toEqual([
+      { foundation: 'F1', xAxis: 'X2', yAxis: 'Y5', planColumnType: 'FC1' },
+    ]);
+  });
+
   it('accepts rows without a visible plan column type if the coordinate is present', () => {
     expect(
       normalizeFoundationPlanCoordinateRows([
@@ -68,6 +93,19 @@ describe('normalizeFoundationPlanCoordinateRows', () => {
       ]),
     ).toEqual([
       { foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: '' },
+    ]);
+  });
+
+  it('keeps foundation labels even when the plan coordinate is not readable', () => {
+    expect(
+      normalizeFoundationPlanCoordinateRows([
+        {
+          foundation: 'F1',
+          planColumnType: '',
+        },
+      ]),
+    ).toEqual([
+      { foundation: 'F1', xAxis: '', yAxis: '', planColumnType: '' },
     ]);
   });
 
@@ -94,7 +132,7 @@ describe('normalizeFoundationPlanCoordinateRows', () => {
     ]);
   });
 
-  it('drops non-highlighted C or P aliases from the foundation plan', () => {
+  it('keeps visible C or P aliases from the foundation plan even when not highlighted', () => {
     expect(
       normalizeFoundationPlanCoordinateRows([
         {
@@ -110,7 +148,7 @@ describe('normalizeFoundationPlanCoordinateRows', () => {
         foundation: 'F1',
         xAxis: 'X1',
         yAxis: 'Y1',
-        planColumnType: '',
+        planColumnType: 'C1',
         isHighlighted: false,
       },
     ]);

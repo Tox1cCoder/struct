@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { REINFORCEMENT_SYSTEM_PROMPT } from './geminiService';
+import {
+  CERTIFIED_FOUNDATION_COORDINATE_PROMPT,
+  FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT,
+  FOUNDATION_PLAN_COORDINATE_PROMPT,
+  REINFORCEMENT_SYSTEM_PROMPT,
+} from './geminiService';
 
 // Guards the 基礎柱形設計例 extraction contract. The zone priority was silently
 // flipped once already (Zone II -> Zone I, commit 65d5db0) by a manual find/replace
@@ -28,5 +33,36 @@ describe('REINFORCEMENT_SYSTEM_PROMPT column/row selection', () => {
     expect(REINFORCEMENT_SYSTEM_PROMPT).toContain('基礎柱形主筋');
     expect(REINFORCEMENT_SYSTEM_PROMPT).toContain('帯筋');
     expect(REINFORCEMENT_SYSTEM_PROMPT).toContain('柱形');
+  });
+});
+
+describe('FOUNDATION_PLAN_COORDINATE_PROMPT visible alias extraction', () => {
+  it('keeps visible C or P aliases instead of forcing plain aliases to empty', () => {
+    expect(FOUNDATION_PLAN_COORDINATE_PROMPT).toContain('visible C or P');
+    expect(FOUNDATION_PLAN_COORDINATE_PROMPT).not.toMatch(/plain monochrome[^.]+empty string/i);
+  });
+
+  it('discourages inferred grid-intersection rows and empty primary coordinates', () => {
+    expect(FOUNDATION_PLAN_COORDINATE_PROMPT).toMatch(/Do not create inferred rows/i);
+    expect(FOUNDATION_PLAN_COORDINATE_PROMPT).toMatch(/only when the foundation or support location is visibly present/i);
+    expect(FOUNDATION_PLAN_COORDINATE_PROMPT).not.toMatch(/return the foundation row and use an empty string/i);
+  });
+});
+
+describe('CERTIFIED_FOUNDATION_COORDINATE_PROMPT schema guidance', () => {
+  it('names the exact response keys to avoid snake_case/type variants', () => {
+    expect(CERTIFIED_FOUNDATION_COORDINATE_PROMPT).toContain('xAxis');
+    expect(CERTIFIED_FOUNDATION_COORDINATE_PROMPT).toContain('yAxis');
+    expect(CERTIFIED_FOUNDATION_COORDINATE_PROMPT).toContain('columnType');
+    expect(CERTIFIED_FOUNDATION_COORDINATE_PROMPT).toContain('1C2');
+    expect(CERTIFIED_FOUNDATION_COORDINATE_PROMPT).toContain('Do not use snake_case');
+  });
+});
+
+describe('FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT fallback guidance', () => {
+  it('extracts foundation-to-code rows without requiring coordinates', () => {
+    expect(FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT).toContain('foundation-to-column mapping');
+    expect(FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT).toContain('Do not require xAxis or yAxis');
+    expect(FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT).toContain('Do not return rows with an empty planColumnType');
   });
 });

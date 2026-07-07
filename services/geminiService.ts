@@ -154,11 +154,14 @@ type ActiveGeminiPdfFile = {
   mimeType: string;
 };
 
-const CERTIFIED_FOUNDATION_COORDINATE_PROMPT = `
+export const CERTIFIED_FOUNDATION_COORDINATE_PROMPT = `
 You are reading one layer of a structural foundation drawing set: 認定柱脚資料.
 
 Your job is to extract the certified support code assigned to each grid placement.
 This PDF is one layer of the same design as 基礎伏図, so the placement key must identify the physical placement of each object.
+
+Output objects must use these exact JSON keys: xAxis, yAxis, columnType, page, bbox.
+Do not use snake_case keys such as x_axis/y_axis, and do not use "type" instead of columnType.
 
 For EACH axis, output a canonical locator token:
 - If the object centerline is on a main grid line, use that line label, for example X1 or Y3.
@@ -167,7 +170,7 @@ For EACH axis, output a canonical locator token:
 - Never collapse an off-grid object to the nearest main axis.
 
 Extraction rules:
-1. Find each certified support code that starts with "C" or "P", such as C3009, C3010, C12, P1.
+1. Find each certified support code that starts with "C" or "P", or has a numeric prefix before C/P, such as C3009, C3010, C12, P1, 1C2, 1C11.
 2. For each support code, identify its X-axis locator token and Y-axis locator token.
 3. The object or its label may be visually offset from the main grid crossing. Use the object center or centerline projection to determine whether each axis is on-line or between-lines.
 4. If the same support code appears in multiple placements, output one row for each placement.
@@ -184,7 +187,7 @@ const CERTIFIED_FOUNDATION_COORDINATE_FALLBACK_PROMPT = `
 You are reading 認定柱脚資料, which is one layer of the same drawing as 基礎伏図.
 
 The previous extraction did not return usable rows. Re-read the PDF carefully and extract only rows where you can identify all three values:
-- one certified support code beginning with C or P
+- one certified support code beginning with C or P, or a numeric-prefixed C/P code such as 1C2 or 1C11
 - one X-axis locator token
 - one Y-axis locator token
 
@@ -199,7 +202,7 @@ Important reading rules:
 1. Search for placements in any of these forms: separate X and Y labels, combined strings, half-grid labels, or table cells that imply one X and one Y placement.
 2. If a row or callout contains a combined placement, split it into xAxis and yAxis using the canonical locator format above.
 3. The object or its label may be offset from the grid crossing. Use the object center or projected centerline to decide whether each axis is on-line or between-lines.
-4. Preserve the exact certified code such as C3009 or P1.
+4. Preserve the exact certified code such as C3009, P1, 1C2, or 1C11.
 5. Do not guess. Omit rows that do not have a readable full placement.
 6. Return every confident row you can find, even if there are only a few.
 
@@ -212,10 +215,10 @@ ${FOUNDATION_PRIORITY_SPATIAL_INSTRUCTION_PDF}
 Output a valid JSON array based on the provided schema.
 `;
 
-const FOUNDATION_PLAN_COORDINATE_PROMPT = `
+export const FOUNDATION_PLAN_COORDINATE_PROMPT = `
 You are reading one layer of the same structural foundation drawing set: 基礎伏図.
 
-Your job is to extract each foundation label together with its grid placement and any FC, C, or P code shown at that same support location.
+Your job is to extract each foundation label together with its grid placement and any FC, C, P, or numeric-prefixed C/P code shown at that same support location.
 This PDF is one layer of the same design as 認定柱脚資料, so the placement key must identify the same physical placement that can be matched across both PDFs.
 
 For EACH axis, output a canonical locator token:
@@ -231,8 +234,8 @@ Extraction rules:
 4. The foundation, support object, or label may be visually offset from the main grid crossing. Use the support object center or centerline projection to determine whether each axis is on-line or between-lines.
 5. Extract the code shown at that same support location into planColumnType:
    - If an FC code is shown, preserve the exact FC code.
-   - If only a C or P code alias is shown, preserve it ONLY when the alias text is colored or the alias is surrounded by a colored highlight/background.
-   - If a C or P alias is plain monochrome or not highlighted, do not trust it. In that case return an empty string for planColumnType.
+   - If only a visible C or P code alias is shown, including numeric-prefixed aliases like 1C2, preserve that exact alias in planColumnType.
+   - Do not erase plain C/P aliases or numeric-prefixed C/P aliases. Use isHighlighted and highlightColor to report whether the alias was colored/highlighted.
    - If no code is visible, use an empty string.
 6. If both FC and C/P are visible for the same support location, choose the FC code.
 7. Preserve the exact foundation label as shown in the plan.
@@ -241,8 +244,9 @@ Extraction rules:
    - true if the chosen visible alias is colored or has a colored background/highlight
    - false if the chosen visible alias is plain monochrome or if no alias is visible
 10. Also return highlightColor with a simple color name like YELLOW, CYAN, BLUE, GREEN, PINK, RED, or empty string if none.
-11. Output one row per unique support location. The same foundation label may appear multiple times.
-12. If an axis locator cannot be read confidently, omit that row instead of guessing.
+11. Output one row per unique support location only when the foundation or support location is visibly present in the drawing. The same foundation label may appear multiple times.
+12. Do not create inferred rows for grid intersections where the foundation/support symbol is not visibly present.
+13. If an axis locator cannot be read confidently, omit that row instead of returning empty xAxis or yAxis. A final mapping cannot be resolved without both axes.
 ${FOUNDATION_PRIORITY_SPATIAL_INSTRUCTION_PDF}
 Output a valid JSON array based on the provided schema.
 `;
@@ -255,7 +259,7 @@ The previous extraction did not return usable rows. Re-read the PDF carefully an
 - one support location within that foundation
 - one X-axis locator token
 - one Y-axis locator token
-- an FC code if visible, otherwise a visible C or P code alias, otherwise an empty string
+- an FC code if visible, otherwise a visible C or P code alias such as C1, P1, or 1C2, otherwise an empty string
 - whether that visible alias is highlighted/colored
 - the highlight color name if present
 
@@ -269,18 +273,40 @@ Important reading rules:
 2. Search for placements in any of these forms: separate X and Y labels, combined strings, half-grid labels, or table/callout combinations that clearly indicate one X and one Y placement.
 3. If one foundation contains multiple support objects, return multiple rows with the same foundation label.
 4. The foundation, support object, or label may be offset from the grid crossing. Use the support object center or projected centerline to decide whether each axis is on-line or between-lines.
-5. Prefer colored aliases in 基礎伏図. If a C or P alias is plain monochrome and not highlighted, set planColumnType to an empty string and set isHighlighted to false.
+5. Preserve any visible C or P alias, including numeric-prefixed aliases like 1C2, in planColumnType. Set isHighlighted to true only when the alias is colored/highlighted; otherwise set isHighlighted to false.
 6. If both FC and C/P appear for the same support location, choose FC.
 7. Preserve the exact foundation label such as F1, FK1, F659834.
-8. Do not guess. Omit rows that do not have a readable full placement.
-9. Return every confident row you can find, even if there are only a few.
+8. Do not guess axis locators. Omit rows that do not have a readable full placement.
+9. Do not create inferred rows for grid intersections where the foundation/support symbol is not visibly present.
+10. Return every confident row you can find, even if there are only a few.
 
 Example output:
 [
   { "foundation": "F1", "xAxis": "X1", "yAxis": "Y1", "planColumnType": "FC1", "isHighlighted": true, "highlightColor": "YELLOW", "page": 1, "bbox": { "ymin": 220, "xmin": 410, "ymax": 280, "xmax": 480 } },
-  { "foundation": "F1", "xAxis": "X1-X2", "yAxis": "Y2", "planColumnType": "", "isHighlighted": false, "highlightColor": "", "page": 1 }
+  { "foundation": "F1", "xAxis": "X1-X2", "yAxis": "Y2", "planColumnType": "C1", "isHighlighted": false, "highlightColor": "", "page": 1 }
 ]
 ${FOUNDATION_PRIORITY_SPATIAL_INSTRUCTION_PDF}
+Output a valid JSON array based on the provided schema.
+`;
+
+export const FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT = `
+You are reading 基礎伏図 after coordinate-based extraction did not produce usable foundation-to-column codes.
+
+Your job is to extract a direct foundation-to-column mapping from visible labels in the plan.
+Do not require xAxis or yAxis for this fallback. Return rows when a foundation label and a visible FC, C, P, or numeric-prefixed C/P code are visually associated with the same footing/support.
+
+Extraction rules:
+1. Find foundation labels beginning with F, such as F1, F1A, F10, FK1.
+2. Find the visible code associated with that foundation/support:
+   - Prefer an FC code over any C, P, or numeric-prefixed C/P code at the same support.
+   - If no FC is visible, preserve the visible C or P code, including numeric-prefixed labels like 1C2.
+3. Do not return rows with an empty planColumnType.
+4. Do not infer a code from grid position alone. Use only visible text/callout association.
+5. If one foundation has multiple distinct visible associated codes, return one row per distinct code.
+6. Preserve exact foundation and code labels, removing only whitespace and parenthesized elevation notes.
+7. Return isHighlighted and highlightColor when the associated code is colored/highlighted; otherwise use false and an empty string.
+
+Output objects must use these exact JSON keys: foundation, planColumnType, isHighlighted, highlightColor, page, bbox.
 Output a valid JSON array based on the provided schema.
 `;
 
@@ -569,7 +595,7 @@ const certifiedCoordinateResponseSchema = {
       },
       columnType: {
         type: 'string',
-        description: 'The exact certified C or P code such as C3009, C3010, C12, P1'
+        description: 'The exact certified C, P, or numeric-prefixed C/P code such as C3009, C3010, C12, P1, 1C2, 1C11'
       },
       page: {
         type: 'number',
@@ -601,7 +627,7 @@ const foundationPlanCoordinateResponseSchema = {
       },
       planColumnType: {
         type: 'string',
-        description: 'The exact FC code if visible at this support location, otherwise the visible C or P alias, otherwise an empty string'
+        description: 'The exact FC code if visible at this support location, otherwise the visible C, P, or numeric-prefixed C/P alias, otherwise an empty string'
       },
       isHighlighted: {
         type: 'boolean',
@@ -618,6 +644,38 @@ const foundationPlanCoordinateResponseSchema = {
       bbox: bboxSchemaJson,
     },
     required: ['foundation', 'xAxis', 'yAxis', 'planColumnType', 'isHighlighted', 'highlightColor'],
+    additionalProperties: false
+  }
+};
+
+const foundationPlanDirectMappingResponseSchema = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      foundation: {
+        type: 'string',
+        description: 'The exact foundation label such as F1, F1A, F10, FK1.'
+      },
+      planColumnType: {
+        type: 'string',
+        description: 'The exact visible FC, C, P, or numeric-prefixed C/P code associated with this foundation. Do not return empty strings.'
+      },
+      isHighlighted: {
+        type: 'boolean',
+        description: 'True if the associated code is colored or has a colored background/highlight. False otherwise.'
+      },
+      highlightColor: {
+        type: 'string',
+        description: 'Simple highlight color name such as YELLOW, CYAN, BLUE, GREEN, PINK, RED, or empty string if none'
+      },
+      page: {
+        type: 'number',
+        description: '1-indexed page number in the PDF where this mapping appears.'
+      },
+      bbox: bboxSchemaJson,
+    },
+    required: ['foundation', 'planColumnType', 'isHighlighted', 'highlightColor'],
     additionalProperties: false
   }
 };
@@ -674,6 +732,18 @@ const generateAgainstActivePdf = async (
     throw new Error('No data returned from the model.');
   }
   return parseStructuredArrayResponse(JSON.parse(jsonText));
+};
+
+const addStageDuration = (
+  diagnostics: PriorityPipelineDiagnostics,
+  stage: 'fallbackGeneration' | 'fallbackValidation',
+  durationMs: number,
+) => {
+  const existing =
+    stage === 'fallbackGeneration'
+      ? diagnostics.stages.fallbackGenerationMs ?? 0
+      : diagnostics.stages.fallbackValidationMs ?? 0;
+  return finishStage(diagnostics, stage, existing + durationMs);
 };
 
 interface PriorityExtractionResult<T> {
@@ -796,8 +866,35 @@ export const extractFoundationPlanCoordinateData = async (
           `Foundation plan extraction still returned unusable rows for ${file.name}. Fallback raw sample:`,
           summarizeRawCoordinateRows(fallbackRaw),
         );
-        throw new Error('No valid foundation plan coordinate data found in response. Gemini returned rows, but none contained a readable foundation label with a governing X/Y coordinate.');
       }
+    }
+
+    if (!validated.some((row) => row.planColumnType)) {
+      diagnostics = markEscalated(diagnostics, 'no-visible-plan-codes');
+      const directStart = Date.now();
+      const directRaw = await generateAgainstActivePdf(
+        ai,
+        active,
+        FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT,
+        foundationPlanDirectMappingResponseSchema,
+        'escalated',
+      );
+      diagnostics = addStageDuration(diagnostics, 'fallbackGeneration', Date.now() - directStart);
+
+      const directValidateStart = Date.now();
+      validated = normalizeFoundationPlanCoordinateRows([...validated, ...directRaw]);
+      diagnostics = addStageDuration(diagnostics, 'fallbackValidation', Date.now() - directValidateStart);
+
+      if (!validated.some((row) => row.planColumnType)) {
+        logError(
+          `Foundation plan direct mapping fallback returned no code-bearing rows for ${file.name}. Raw sample:`,
+          summarizeRawCoordinateRows(directRaw),
+        );
+      }
+    }
+
+    if (validated.length === 0) {
+      throw new Error('No valid foundation plan data found in response. Gemini returned rows, but none contained a readable foundation label.');
     }
 
     return validated;

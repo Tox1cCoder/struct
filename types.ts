@@ -223,7 +223,7 @@ export interface FoundationPriorityEvidenceLocation {
 
 export interface FoundationPriorityResolution {
   columnType: string;
-  method: 'plan-fc' | 'certified-fallback';
+  method: 'plan-fc' | 'certified-fallback' | 'plan-alias-fallback';
   locations: FoundationPriorityEvidenceLocation[];
 }
 

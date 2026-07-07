@@ -25,6 +25,76 @@ describe('buildFoundationPriorityText', () => {
     expect(result.text).toBe('F1: C3009');
   });
 
+  it('falls back to certified numeric-prefixed C codes such as 1C2', async () => {
+    const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
+
+    const result = buildFoundationPriorityText(
+      [{ xAxis: 'X1', yAxis: 'Y1', columnType: '1C2' }],
+      [{ foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: '' }],
+    );
+
+    expect(result.lines).toEqual(['F1: 1C2']);
+  });
+
+  it('merges numeric-prefixed certified codes from the observed foundation PDF coordinate layout', async () => {
+    const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
+
+    const result = buildFoundationPriorityText(
+      [
+        { xAxis: 'X1', yAxis: 'Y5', columnType: '1C2' },
+        { xAxis: 'X2', yAxis: 'Y5', columnType: '1C2' },
+        { xAxis: 'X3', yAxis: 'Y5', columnType: '1C2' },
+        { xAxis: 'X4', yAxis: 'Y5', columnType: '1C3' },
+      ],
+      [
+        { foundation: 'F6', xAxis: 'X1', yAxis: 'Y5', planColumnType: '' },
+        { foundation: 'F3', xAxis: 'X2', yAxis: 'Y5', planColumnType: '' },
+        { foundation: 'F4', xAxis: 'X3', yAxis: 'Y5', planColumnType: '' },
+        { foundation: 'F5', xAxis: 'X4', yAxis: 'Y5', planColumnType: '' },
+      ],
+    );
+
+    expect(result.lines).toEqual(['F3: 1C2', 'F4: 1C2', 'F5: 1C3', 'F6: 1C2']);
+  });
+
+  it('uses the visible foundation plan C or P alias when no certified coordinate matches', async () => {
+    const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
+
+    const result = buildFoundationPriorityText(
+      [{ xAxis: 'X2', yAxis: 'Y2', columnType: 'C3009' }],
+      [{ foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: 'C1' }],
+    );
+
+    expect(result.lines).toEqual(['F1: C1']);
+    expect(result.rows[0].resolutions[0].method).toBe('plan-alias-fallback');
+  });
+
+  it('uses a direct foundation-plan mapping when coordinates are unavailable', async () => {
+    const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
+
+    const result = buildFoundationPriorityText(
+      [],
+      [{ foundation: 'F1', xAxis: '', yAxis: '', planColumnType: 'C1' }],
+    );
+
+    expect(result.lines).toEqual(['F1: C1']);
+    expect(result.rows[0].resolutions[0].method).toBe('plan-alias-fallback');
+  });
+
+  it('does not add direct C/P fallback codes after coordinate evidence already resolves the foundation', async () => {
+    const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
+
+    const result = buildFoundationPriorityText(
+      [{ xAxis: 'X1', yAxis: 'Y1', columnType: 'C3009' }],
+      [
+        { foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: '' },
+        { foundation: 'F1', xAxis: '', yAxis: '', planColumnType: 'C1' },
+      ],
+    );
+
+    expect(result.lines).toEqual(['F1: C3009']);
+  });
+
   it('treats certified P codes the same as certified C codes', async () => {
     const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
 
@@ -35,6 +105,20 @@ describe('buildFoundationPriorityText', () => {
 
     expect(result.lines).toEqual(['F1: P1']);
     expect(result.text).toBe('F1: P1');
+  });
+
+  it('prefers certified C over P when both exist at the same coordinate', async () => {
+    const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
+
+    const result = buildFoundationPriorityText(
+      [
+        { xAxis: 'X1', yAxis: 'Y1', columnType: 'P1' },
+        { xAxis: 'X1', yAxis: 'Y1', columnType: 'C3009' },
+      ],
+      [{ foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: '' }],
+    );
+
+    expect(result.lines).toEqual(['F1: C3009']);
   });
 
   it('renders one row per foundation with distinct codes resolved per location', async () => {
@@ -116,15 +200,28 @@ describe('buildFoundationPriorityText', () => {
     expect(result.lines).toEqual(['F1: FC1']);
   });
 
-  it('omits foundations that have neither FC nor a certified coordinate match', async () => {
+  it('omits unresolved foundation labels from final result rows', async () => {
     const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
 
     const result = buildFoundationPriorityText(
       [{ xAxis: 'X2', yAxis: 'Y2', columnType: 'C3009' }],
-      [{ foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: 'C1' }],
+      [{ foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: '' }],
     );
 
     expect(result.lines).toEqual([]);
     expect(result.text).toBe('');
+    expect(result.rows).toEqual([]);
+  });
+
+  it('omits foundation-only plan rows when no coordinate was extracted', async () => {
+    const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
+
+    const result = buildFoundationPriorityText(
+      [],
+      [{ foundation: 'F1', xAxis: '', yAxis: '', planColumnType: '' }],
+    );
+
+    expect(result.lines).toEqual([]);
+    expect(result.rows).toEqual([]);
   });
 });

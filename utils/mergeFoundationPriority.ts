@@ -38,9 +38,12 @@ const isValidFoundation = (value: string) => /^F[A-Z0-9]+$/.test(value);
 
 const isValidAxis = (value: string) => /^[XY][A-Z0-9-]+$/.test(value);
 
-const isValidColumnCode = (value: string) => /^(?:FC|C|P)[A-Z0-9]+$/.test(value);
+const isValidColumnCode = (value: string) =>
+  /^(?:FC[A-Z0-9]+|(?:\d+)?C[A-Z0-9]+|(?:\d+)?P[A-Z0-9]+)$/.test(value);
 
 const isFcCode = (value: string) => value.startsWith('FC');
+
+const isCertifiedCCode = (value: string) => /^(?:\d+)?C[A-Z0-9]+$/.test(value);
 
 const naturalCompare = (left: string, right: string) =>
   left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
@@ -71,15 +74,16 @@ const normalizeFoundationPlanRow = (row: FoundationPlanCoordinateRow): Foundatio
   const xAxis = normalizeLabel(row.xAxis);
   const yAxis = normalizeLabel(row.yAxis);
   const planColumnType = normalizeLabel(row.planColumnType);
+  const hasReadableCoordinate = isValidAxis(xAxis) && isValidAxis(yAxis);
 
-  if (!isValidFoundation(foundation) || !isValidAxis(xAxis) || !isValidAxis(yAxis)) {
+  if (!isValidFoundation(foundation)) {
     return null;
   }
 
   return {
     foundation,
-    xAxis,
-    yAxis,
+    xAxis: hasReadableCoordinate ? xAxis : '',
+    yAxis: hasReadableCoordinate ? yAxis : '',
     planColumnType,
     sourceFileId: row.sourceFileId,
     page: row.page,
@@ -100,7 +104,7 @@ const makeEvidence = (
 };
 
 const formatPriorityRow = (row: Pick<FoundationPriorityWorkingRow, 'foundation' | 'codes'>) =>
-  `${row.foundation}: ${row.codes.join(', ')}`;
+  row.codes.length > 0 ? `${row.foundation}: ${row.codes.join(', ')}` : `${row.foundation}:`;
 
 export const buildFoundationPriorityText = (
   certifiedRows: CertifiedCoordinateRow[],
@@ -115,6 +119,11 @@ export const buildFoundationPriorityText = (
     const key = toCoordinateKey(normalizedRow.xAxis, normalizedRow.yAxis);
     if (!certifiedByCoordinate.has(key)) {
       certifiedByCoordinate.set(key, normalizedRow);
+    } else {
+      const existing = certifiedByCoordinate.get(key);
+      if (existing && !isCertifiedCCode(existing.columnType) && isCertifiedCCode(normalizedRow.columnType)) {
+        certifiedByCoordinate.set(key, normalizedRow);
+      }
     }
   }
 
@@ -122,7 +131,7 @@ export const buildFoundationPriorityText = (
   // collects all locations where that columnType was resolved.
   type ResolutionAccumulator = {
     columnType: string;
-    method: 'plan-fc' | 'certified-fallback';
+    method: FoundationPriorityResolution['method'];
     locations: FoundationPriorityEvidenceLocation[];
     codeOrder: number;
   };
@@ -139,11 +148,12 @@ export const buildFoundationPriorityText = (
 
     const planColumnType = normalizedRow.planColumnType;
     const hasFc = isValidColumnCode(planColumnType) && isFcCode(planColumnType);
-    const coordKey = toCoordinateKey(normalizedRow.xAxis, normalizedRow.yAxis);
-    const certifiedMatch = certifiedByCoordinate.get(coordKey);
+    const hasReadableCoordinate = isValidAxis(normalizedRow.xAxis) && isValidAxis(normalizedRow.yAxis);
+    const coordKey = hasReadableCoordinate ? toCoordinateKey(normalizedRow.xAxis, normalizedRow.yAxis) : '';
+    const certifiedMatch = hasReadableCoordinate ? certifiedByCoordinate.get(coordKey) : undefined;
 
     let resolvedColumnType: string | null = null;
-    let method: 'plan-fc' | 'certified-fallback' | null = null;
+    let method: FoundationPriorityResolution['method'] | null = null;
 
     if (hasFc) {
       resolvedColumnType = planColumnType;
@@ -151,9 +161,24 @@ export const buildFoundationPriorityText = (
     } else if (certifiedMatch) {
       resolvedColumnType = certifiedMatch.columnType;
       method = 'certified-fallback';
+    } else if (isValidColumnCode(planColumnType)) {
+      resolvedColumnType = planColumnType;
+      method = 'plan-alias-fallback';
     }
 
     if (!resolvedColumnType || !method) continue;
+
+    if (!foundationFirstSeen.has(normalizedRow.foundation)) {
+      foundationFirstSeen.set(normalizedRow.foundation, foundationSeq++);
+    }
+
+    const filesForFoundation =
+      foundationContributingFiles.get(normalizedRow.foundation) ?? new Set<string>();
+    if (normalizedRow.sourceFileId) filesForFoundation.add(normalizedRow.sourceFileId);
+    foundationContributingFiles.set(normalizedRow.foundation, filesForFoundation);
+
+    const byColumnType =
+      foundationToResolutions.get(normalizedRow.foundation) ?? new Map<string, ResolutionAccumulator>();
 
     const planEvidence = makeEvidence(
       normalizedRow.sourceFileId,
@@ -191,23 +216,16 @@ export const buildFoundationPriorityText = (
       ...(certifiedEvidence ? { certified: certifiedEvidence } : {}),
     };
 
-    if (!foundationFirstSeen.has(normalizedRow.foundation)) {
-      foundationFirstSeen.set(normalizedRow.foundation, foundationSeq++);
-    }
-
-    const filesForFoundation =
-      foundationContributingFiles.get(normalizedRow.foundation) ?? new Set<string>();
-    if (planEvidence?.fileId) filesForFoundation.add(planEvidence.fileId);
     if (certifiedEvidence?.fileId) filesForFoundation.add(certifiedEvidence.fileId);
     foundationContributingFiles.set(normalizedRow.foundation, filesForFoundation);
 
-    const byColumnType =
-      foundationToResolutions.get(normalizedRow.foundation) ?? new Map<string, ResolutionAccumulator>();
     const existing = byColumnType.get(resolvedColumnType);
     if (existing) {
-      // Preserve the strongest method: plan-fc beats certified-fallback.
+      // Preserve the strongest method for duplicate codes.
       if (existing.method === 'certified-fallback' && method === 'plan-fc') {
         existing.method = 'plan-fc';
+      } else if (existing.method === 'plan-alias-fallback' && method !== 'plan-alias-fallback') {
+        existing.method = method;
       }
       existing.locations.push(evidenceLocation);
     } else {
@@ -225,16 +243,31 @@ export const buildFoundationPriorityText = (
     naturalCompare(leftF, rightF),
   );
 
-  const rows: FoundationPriorityWorkingRow[] = sortedFoundations.map(([foundation, byColumnType]) => {
-    const resolutions: FoundationPriorityResolution[] = [...byColumnType.values()]
+  const rows: FoundationPriorityWorkingRow[] = sortedFoundations.flatMap(([foundation, byColumnType]) => {
+    const rawResolutions: FoundationPriorityResolution[] = [...byColumnType.values()]
       .sort((a, b) => a.codeOrder - b.codeOrder)
       .map(({ columnType, method, locations }) => ({ columnType, method, locations }));
+
+    const hasStrongerOrLocatedResolution = rawResolutions.some((res) =>
+      res.method !== 'plan-alias-fallback' ||
+      res.locations.some((loc) => loc.plan.xAxis && loc.plan.yAxis),
+    );
+    const resolutions = hasStrongerOrLocatedResolution
+      ? rawResolutions.filter((res) =>
+          res.method !== 'plan-alias-fallback' ||
+          res.locations.some((loc) => loc.plan.xAxis && loc.plan.yAxis),
+        )
+      : rawResolutions;
+
+    if (resolutions.length === 0) {
+      return [];
+    }
 
     const codes = resolutions.map((res) => res.columnType);
     const sourceKey = `priority:${foundation}`;
     const fileIds = foundationContributingFiles.get(foundation);
 
-    return {
+    return [{
       rowId: sourceKey,
       sourceKey,
       sourceFileIds: fileIds ? [...fileIds] : [],
@@ -243,7 +276,7 @@ export const buildFoundationPriorityText = (
       foundation,
       codes,
       resolutions,
-    };
+    }];
   });
 
   const lines = rows.map(formatPriorityRow);
