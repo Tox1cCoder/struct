@@ -41,6 +41,7 @@ import { hasActiveJobs } from './utils/fileJobs';
 import { StatusStrip } from './components/StatusStrip';
 import { buildColumnWorkingRows } from './utils/columnWorkingRows';
 import { addManualRow, deleteWorkingRow, reconcileExtractedRows, updateWorkingRow } from './utils/editableRows';
+import { createManualFrameData } from './utils/frameData';
 
 type TabType = 'column' | 'frame' | 'priority' | 'report';
 
@@ -223,21 +224,14 @@ const App: React.FC = () => {
   const handleFrameAddRow = useCallback(() => {
     setFrameRows((state) => {
       const id = `frame:manual:${Math.random().toString(36).slice(2, 9)}`;
+      const frameType = state.rows[0]?.frameType ?? 'FW';
       return addManualRow(state, {
         rowId: id,
         sourceKey: id,
         sourceFileIds: [],
         provenance: 'manual',
         edited: true,
-        frameName: '',
-        b: '',
-        h: '',
-        topRebarD: '',
-        topRebarValue: '',
-        bottomRebarD: '',
-        bottomRebarValue: '',
-        stirrupD: '',
-        stirrupValue: '',
+        ...createManualFrameData(frameType),
       });
     });
   }, []);
