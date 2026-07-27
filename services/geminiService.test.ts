@@ -82,6 +82,8 @@ describe('FRAME_SYSTEM_PROMPT FW/FG contract', () => {
   it('requires FW circle counting, numeric diameters, and defaults', () => {
     expect(FRAME_SYSTEM_PROMPT).toMatch(/circular markers/i);
     expect(FRAME_SYSTEM_PROMPT).toMatch(/ignore.*x.*marks/i);
+    expect(FRAME_SYSTEM_PROMPT).toMatch(/lower reinforcement square/i);
+    expect(FRAME_SYSTEM_PROMPT).toMatch(/exclude.*above/i);
     expect(FRAME_SYSTEM_PROMPT).toContain('FW_ヨコ筋_本数');
     expect(FRAME_SYSTEM_PROMPT).toMatch(/default.*13/i);
     expect(FRAME_SYSTEM_PROMPT).toMatch(/default.*10/i);

@@ -916,7 +916,7 @@ export const FRAME_SYSTEM_PROMPT = [
   'FW output fields:',
   '- FW_ベース筋_直径 (fwBaseRebarDiameter): always 13.',
   '- FW_タテ筋_直径 (fwVerticalRebarDiameter): numeric value after D in the タテ callout. If no callout exists, default 13.',
-  '- FW_ヨコ筋_本数 (fwHorizontalRebarCount): count only circular markers left of the vertical white line and below the left extended green line; ignore x marks. Return 0 when none exist.',
+  '- FW_ヨコ筋_本数 (fwHorizontalRebarCount): count circular markers only inside the lower reinforcement square, on its left vertical side; exclude markers above that square and ignore all x marks. Return 0 when none exist.',
   '- FW_ヨコ筋_直径 (fwHorizontalRebarDiameter): numeric value after D in the ヨコ callout. If no callout exists, default 10.',
   '',
   'FG output fields (all diameters are numeric values after D only, never include the D prefix):',
