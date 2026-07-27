@@ -906,10 +906,12 @@ export const extractFoundationPlanCoordinateData = async (
 };
 
 // Frame extraction prompt (FW and FG types)
+export const FRAME_MODEL = 'gemini-3.6-flash';
+
 export const FRAME_SYSTEM_PROMPT = [
   'You are a structural engineering data extraction specialist. Extract one JSON row per unique FW or FG symbol from a Japanese structural CAD drawing.',
   '',
-  'Every row must include frameType (FW or FG), frameName, b, and h. b and h use the drawing dimensions: FW uses the current bottom width and left wall-height logic; FG splits B×D into b and h.',
+  'Every row must include frameType (FW or FG), frameName, b, and h. FW b is the bottom width. FW h is the dimension beside the bottom-most inner reinforcement square (the small white outlined box); ignore the 500 overall height and 30 base dimension. FG splits B×D into b and h.',
   '',
   'FW output fields:',
   '- FW_ベース筋_直径 (fwBaseRebarDiameter): always 13.',
@@ -940,7 +942,7 @@ export const extractFrameData = async (base64Data: string, mimeType: string): Pr
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: FRAME_MODEL,
       contents: {
         parts: [
           {
