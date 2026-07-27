@@ -113,19 +113,35 @@ export interface FoundationPlanCoordinateFileResult {
   diagnostics?: PriorityPipelineDiagnostics;
 }
 
-export interface FrameData {
+interface FrameBaseData {
   frameName: string;
+  frameType: 'FW' | 'FG';
   b: string;
   h: string;
-  topRebarD: string;
-  topRebarValue: string;
-  bottomRebarD: string;
-  bottomRebarValue: string;
-  stirrupD: string;
-  stirrupValue: string;
   bbox?: BoundingBox;
   sourceFileId?: string;
 }
+
+export interface FWFrameData extends FrameBaseData {
+  frameType: 'FW';
+  fwBaseRebarDiameter: string;
+  fwVerticalRebarDiameter: string;
+  fwHorizontalRebarCount: string;
+  fwHorizontalRebarDiameter: string;
+}
+
+export interface FGFrameData extends FrameBaseData {
+  frameType: 'FG';
+  fgTopRebarDiameter: string;
+  fgBottomRebarDiameter: string;
+  fgStirrupDiameter: string;
+  fgStirrupMaxDistance: string;
+  fgBellyRebarDiameter: string;
+  fgWidthStopRebarDiameter: string;
+  fgWidthStopRebarMaxDistance: string;
+}
+
+export type FrameData = FWFrameData | FGFrameData;
 
 export interface FrameFileResult {
   id: string;
