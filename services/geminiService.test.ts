@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CERTIFIED_FOUNDATION_COORDINATE_PROMPT,
   FRAME_MODEL,
+  FRAME_RESPONSE_REQUIRED_FIELDS,
   FRAME_SYSTEM_PROMPT,
   FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT,
   FOUNDATION_PLAN_COORDINATE_PROMPT,
@@ -77,6 +78,18 @@ describe('FRAME_SYSTEM_PROMPT FW/FG contract', () => {
   it('defines FW h from the bottom-most inner reinforcement square', () => {
     expect(FRAME_SYSTEM_PROMPT).toMatch(/bottom-most inner reinforcement square/i);
     expect(FRAME_SYSTEM_PROMPT).toMatch(/ignore.*500.*30/i);
+  });
+
+  it('requires all FG fields instead of allowing visible rows to be omitted', () => {
+    expect(FRAME_SYSTEM_PROMPT).toMatch(/never leave.*FG.*blank.*visible/i);
+    expect(FRAME_RESPONSE_REQUIRED_FIELDS).toEqual(
+      expect.arrayContaining([
+        'fgBottomRebarDiameter',
+        'fgStirrupDiameter',
+        'fgStirrupMaxDistance',
+        'fgBellyRebarDiameter',
+      ]),
+    );
   });
 
   it('requires FW circle counting, numeric diameters, and defaults', () => {

@@ -907,6 +907,23 @@ export const extractFoundationPlanCoordinateData = async (
 
 // Frame extraction prompt (FW and FG types)
 export const FRAME_MODEL = 'gemini-3.6-flash';
+export const FRAME_RESPONSE_REQUIRED_FIELDS = [
+  'frameType',
+  'frameName',
+  'b',
+  'h',
+  'fwBaseRebarDiameter',
+  'fwVerticalRebarDiameter',
+  'fwHorizontalRebarCount',
+  'fwHorizontalRebarDiameter',
+  'fgTopRebarDiameter',
+  'fgBottomRebarDiameter',
+  'fgStirrupDiameter',
+  'fgStirrupMaxDistance',
+  'fgBellyRebarDiameter',
+  'fgWidthStopRebarDiameter',
+  'fgWidthStopRebarMaxDistance',
+];
 
 export const FRAME_SYSTEM_PROMPT = [
   'You are a structural engineering data extraction specialist. Extract one JSON row per unique FW or FG symbol from a Japanese structural CAD drawing.',
@@ -925,6 +942,7 @@ export const FRAME_SYSTEM_PROMPT = [
   '- FG_St_直径 (fgStirrupDiameter) and FG_St_距離_最大 (fgStirrupMaxDistance) from St.; the maximum distance is the numeric value after @.',
   '- FG_腹筋_直径 (fgBellyRebarDiameter) from 腹筋.',
   '- FG_巾止筋_直径 (fgWidthStopRebarDiameter) and FG_巾止筋_距離_最大 (fgWidthStopRebarMaxDistance) from 巾止筋; the maximum distance is the numeric value after @.',
+  'Never leave an FG field blank when its source row is visible; use empty strings only for unavailable FG rows or FW-only fields.',
   '',
   'For a logical FG symbol such as FG1B that is visually split into two subcolumns, return one row only. Its required diameter values are shared, so read them from either subcolumn. Do not create duplicate rows for locations.',
   'Remove material specifications in parentheses. Return empty strings for unavailable optional FG fields.',
@@ -980,7 +998,7 @@ export const extractFrameData = async (base64Data: string, mimeType: string): Pr
               fgWidthStopRebarMaxDistance: { type: Type.STRING, description: "FG_巾止筋_距離_最大: maximum distance" },
               bbox: bboxSchemaTyped,
             },
-            required: ['frameType', 'frameName', 'b', 'h']
+            required: FRAME_RESPONSE_REQUIRED_FIELDS,
           }
         }
       }
