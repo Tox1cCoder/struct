@@ -214,6 +214,13 @@ const App: React.FC = () => {
   useEffect(() => {
     setFrameRows((state) => reconcileExtractedRows(state, frameProposals));
   }, [frameProposals]);
+  const frameRowsByType = useMemo(
+    () => ({
+      FW: frameRows.rows.filter((row) => row.frameType === 'FW'),
+      FG: frameRows.rows.filter((row) => row.frameType === 'FG'),
+    }),
+    [frameRows.rows],
+  );
 
   const handleFrameRowChange = useCallback((rowId: string, patch: Partial<FrameData>) => {
     setFrameRows((state) => updateWorkingRow(state, rowId, patch));
@@ -221,10 +228,9 @@ const App: React.FC = () => {
   const handleFrameDeleteRow = useCallback((rowId: string) => {
     setFrameRows((state) => deleteWorkingRow(state, rowId));
   }, []);
-  const handleFrameAddRow = useCallback(() => {
+  const handleFrameAddRow = useCallback((frameType: FrameData['frameType']) => {
     setFrameRows((state) => {
       const id = `frame:manual:${Math.random().toString(36).slice(2, 9)}`;
-      const frameType = state.rows[0]?.frameType ?? 'FW';
       return addManualRow(state, {
         rowId: id,
         sourceKey: id,
@@ -797,14 +803,20 @@ const App: React.FC = () => {
 
                 {frameRows.rows.length > 0 && (
                   <div className="space-y-6 animate-fade-in-up">
-                    <FrameResultsTable
-                      data={frameRows.rows}
-                      selectedRowKey={selectedRowKey}
-                      onRowSelect={handleRowSelect}
-                      onRowChange={handleFrameRowChange}
-                      onAddRow={handleFrameAddRow}
-                      onDeleteRow={handleFrameDeleteRow}
-                    />
+                    {(['FW', 'FG'] as const).map((frameType) => {
+                      const rows = frameRowsByType[frameType];
+                      return rows.length > 0 ? (
+                        <FrameResultsTable
+                          key={frameType}
+                          data={rows}
+                          selectedRowKey={selectedRowKey}
+                          onRowSelect={handleRowSelect}
+                          onRowChange={handleFrameRowChange}
+                          onAddRow={() => handleFrameAddRow(frameType)}
+                          onDeleteRow={handleFrameDeleteRow}
+                        />
+                      ) : null;
+                    })}
                     <InfoBanner accent="amber">
                       <strong>Note:</strong> Frame data extracted from images. FW = Foundation Wall (布基礎), FG =
                       Foundation Girder (地中梁/フーチング). Always verify AI-extracted engineering data against

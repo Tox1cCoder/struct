@@ -93,4 +93,32 @@ describe('App foundation priority tab', () => {
     expect(await screen.findByText('No resolved foundation mappings yet.')).toBeInTheDocument();
     expect(screen.queryByLabelText('F1 codes')).not.toBeInTheDocument();
   });
+
+  it('renders separate FW and FG schedules when both types are uploaded', async () => {
+    vi.mocked(extractFrameData).mockResolvedValue([
+      {
+        frameType: 'FW', frameName: 'FW1', b: '300', h: '350',
+        fwBaseRebarDiameter: '13', fwVerticalRebarDiameter: '13',
+        fwHorizontalRebarCount: '3', fwHorizontalRebarDiameter: '10',
+      },
+      {
+        frameType: 'FG', frameName: 'FG1', b: '600', h: '600',
+        fgTopRebarDiameter: '25', fgBottomRebarDiameter: '25',
+        fgStirrupDiameter: '13', fgStirrupMaxDistance: '150',
+        fgBellyRebarDiameter: '13', fgWidthStopRebarDiameter: '10',
+        fgWidthStopRebarMaxDistance: '1000',
+      },
+    ]);
+
+    render(<App />);
+    fireEvent.click(screen.getAllByRole('button', { name: /Frame \(FW\/FG\)/i })[0]);
+    fireEvent.drop(screen.getByTestId('frame-dropzone'), {
+      dataTransfer: { files: [new File(['image'], 'frames.png', { type: 'image/png' })] },
+    });
+
+    expect(await screen.findByLabelText('FW1 FW_ヨコ筋_本数')).toBeInTheDocument();
+    expect(await screen.findByLabelText('FG1 FG_巾止筋_距離_最大')).toBeInTheDocument();
+    expect(screen.queryByLabelText('FW1 FG_上端筋_直径')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('FG1 FW_ヨコ筋_本数')).not.toBeInTheDocument();
+  });
 });
