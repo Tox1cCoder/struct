@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { BoundingBox, EditableFrameData, FrameData } from '../types';
+import { buildFrameExportRows, getFrameColumns } from '../utils/frameTable';
 
 interface RowSource {
   fileId: string;
@@ -33,50 +34,21 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({
   }
 
   const editable = Boolean(onRowChange);
+  const frameType = data[0]?.frameType ?? 'FW';
+  const columns = getFrameColumns(frameType);
 
   const handleExportExcel = () => {
     setExporting(true);
     try {
-      const headers = [
-        'Frame Name (符号)',
-        'B',
-        'H',
-        '上端筋 D',
-        '上端筋 Value',
-        '下端筋 D',
-        '下端筋 Value',
-        'St. D',
-        'St. Value',
-      ];
-
-      const rows = data.map((row) => [
-        row.frameName,
-        row.b,
-        row.h,
-        row.topRebarD,
-        row.topRebarValue,
-        row.bottomRebarD,
-        row.bottomRebarValue,
-        row.stirrupD || '',
-        row.stirrupValue || '',
-      ]);
+      const headers = columns.map(({ header }) => header);
+      const rows = buildFrameExportRows(data);
 
       const wsData = [headers, ...rows];
 
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(wsData);
 
-      ws['!cols'] = [
-        { wch: 15 },
-        { wch: 8 },
-        { wch: 8 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 10 },
-      ];
+      ws['!cols'] = headers.map((header) => ({ wch: Math.max(10, header.length + 2) }));
 
       XLSX.utils.book_append_sheet(wb, ws, 'Frame Data');
 
@@ -136,12 +108,11 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({
         <table className="w-full text-left">
           <thead>
             <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider">
-              <th className="px-4 py-3 font-semibold border-b border-gray-200">Frame Name</th>
-              <th className="px-4 py-3 font-semibold border-b border-gray-200">B</th>
-              <th className="px-4 py-3 font-semibold border-b border-gray-200">H</th>
-              <th className="px-4 py-3 font-semibold border-b border-gray-200 bg-amber-50" colSpan={2}>上端筋</th>
-              <th className="px-4 py-3 font-semibold border-b border-gray-200 bg-orange-50" colSpan={2}>下端筋</th>
-              <th className="px-4 py-3 font-semibold border-b border-gray-200 bg-blue-50" colSpan={2}>St.</th>
+              {columns.map((column) => (
+                <th key={column.key} className="px-4 py-3 font-semibold border-b border-gray-200">
+                  {column.header}
+                </th>
+              ))}
               {(onRowSelect || onDeleteRow) && (
                 <th className="px-4 py-3 font-semibold border-b border-gray-200">Actions</th>
               )}
@@ -206,78 +177,25 @@ export const FrameResultsTable: React.FC<FrameResultsTableProps> = ({
                       row.h
                     )}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-700 bg-amber-50/30 font-mono">
-                    {editable ? (
-                      <input
-                        aria-label={`${label} top rebar D`}
-                        value={row.topRebarD}
-                        onChange={(e) => handlePatch(row, { topRebarD: e.target.value })}
-                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
-                      />
-                    ) : (
-                      row.topRebarD
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700 bg-amber-50/30 font-mono">
-                    {editable ? (
-                      <input
-                        aria-label={`${label} top rebar value`}
-                        value={row.topRebarValue}
-                        onChange={(e) => handlePatch(row, { topRebarValue: e.target.value })}
-                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
-                      />
-                    ) : (
-                      row.topRebarValue
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700 bg-orange-50/30 font-mono">
-                    {editable ? (
-                      <input
-                        aria-label={`${label} bottom rebar D`}
-                        value={row.bottomRebarD}
-                        onChange={(e) => handlePatch(row, { bottomRebarD: e.target.value })}
-                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
-                      />
-                    ) : (
-                      row.bottomRebarD
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700 bg-orange-50/30 font-mono">
-                    {editable ? (
-                      <input
-                        aria-label={`${label} bottom rebar value`}
-                        value={row.bottomRebarValue}
-                        onChange={(e) => handlePatch(row, { bottomRebarValue: e.target.value })}
-                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
-                      />
-                    ) : (
-                      row.bottomRebarValue
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700 bg-blue-50/30 font-mono">
-                    {editable ? (
-                      <input
-                        aria-label={`${label} stirrup D`}
-                        value={row.stirrupD ?? ''}
-                        onChange={(e) => handlePatch(row, { stirrupD: e.target.value })}
-                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
-                      />
-                    ) : (
-                      row.stirrupD || '-'
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700 bg-blue-50/30 font-mono">
-                    {editable ? (
-                      <input
-                        aria-label={`${label} stirrup value`}
-                        value={row.stirrupValue ?? ''}
-                        onChange={(e) => handlePatch(row, { stirrupValue: e.target.value })}
-                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
-                      />
-                    ) : (
-                      row.stirrupValue || '-'
-                    )}
-                  </td>
+                  {columns.slice(3).map((column) => {
+                    const value = (row as unknown as Record<string, string>)[column.key] ?? '';
+                    return (
+                      <td key={column.key} className="px-4 py-3 text-sm text-gray-700 bg-amber-50/30 font-mono">
+                        {editable ? (
+                          <input
+                            aria-label={label + ' ' + column.header}
+                            value={value}
+                            onChange={(e) =>
+                              handlePatch(row, { [column.key]: e.target.value } as Partial<FrameData>)
+                            }
+                            className="w-20 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                          />
+                        ) : (
+                          value || '-'
+                        )}
+                      </td>
+                    );
+                  })}
                   {(onRowSelect || onDeleteRow) && (
                     <td className="px-4 py-3 text-sm">
                       <div className="flex items-center gap-2">
