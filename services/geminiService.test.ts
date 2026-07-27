@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CERTIFIED_FOUNDATION_COORDINATE_PROMPT,
+  FRAME_SYSTEM_PROMPT,
   FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT,
   FOUNDATION_PLAN_COORDINATE_PROMPT,
   REINFORCEMENT_SYSTEM_PROMPT,
@@ -64,5 +65,31 @@ describe('FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT fallback guidance', () => {
     expect(FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT).toContain('foundation-to-column mapping');
     expect(FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT).toContain('Do not require xAxis or yAxis');
     expect(FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT).toContain('Do not return rows with an empty planColumnType');
+  });
+});
+
+describe('FRAME_SYSTEM_PROMPT FW/FG contract', () => {
+  it('requires FW circle counting, numeric diameters, and defaults', () => {
+    expect(FRAME_SYSTEM_PROMPT).toMatch(/white circles/i);
+    expect(FRAME_SYSTEM_PROMPT).toContain('FW_ヨコ筋_本数');
+    expect(FRAME_SYSTEM_PROMPT).toMatch(/default.*13/i);
+    expect(FRAME_SYSTEM_PROMPT).toMatch(/default.*10/i);
+    expect(FRAME_SYSTEM_PROMPT).toMatch(/numeric.*after D/i);
+  });
+
+  it('names every FG output field and handles FG1B once', () => {
+    expect(FRAME_SYSTEM_PROMPT).toMatch(/FG1B/i);
+    expect(FRAME_SYSTEM_PROMPT).toMatch(/one.*row/i);
+    for (const name of [
+      'FG_上端筋_直径',
+      'FG_下端筋_直径',
+      'FG_St_直径',
+      'FG_St_距離_最大',
+      'FG_腹筋_直径',
+      'FG_巾止筋_直径',
+      'FG_巾止筋_距離_最大',
+    ]) {
+      expect(FRAME_SYSTEM_PROMPT).toContain(name);
+    }
   });
 });

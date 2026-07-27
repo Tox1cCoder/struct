@@ -13,6 +13,7 @@ import {
   PriorityPipelineDiagnostics,
 } from "../types";
 import { parseBoundingBox, parsePage } from "../utils/boundingBox";
+import { normalizeFrameData } from "../utils/frameData";
 import {
   normalizeCertifiedCoordinateRows,
   normalizeFoundationPlanCoordinateRows,
@@ -905,71 +906,29 @@ export const extractFoundationPlanCoordinateData = async (
 };
 
 // Frame extraction prompt (FW and FG types)
-const FRAME_SYSTEM_PROMPT = `
-You are a structural engineering data extraction specialist. Your task is to extract frame data from Japanese structural engineering CAD drawings.
-
-**There are TWO types of frames:**
-
-## Type 1: FW (Foundation Wall / 布基礎)
-These images show a cross-section of a foundation wall with the following characteristics:
-- The frame name (e.g., "FW1", "FW2") appears at the TOP of the image, usually in a title row
-- Dimension values are shown on the drawing:
-  - The BOTTOM horizontal dimension (e.g., "300") = B (Width)
-  - The LEFT VERTICAL dimension showing the wall height (e.g., "350", "1,200以下") = H (Height)
-  - Look for the dimension near the green/cyan square outline showing the wall depth
-- Reinforcement info appears as labels like:
-  - "ﾖｺ: D13@200 (ダブル)" - Horizontal reinforcement → This is 上端筋 (top)
-  - "ﾀﾃ: D13@200 (ダブル)" - Vertical reinforcement → This is 下端筋 (bottom)
-- Extract: Split "D13@200" into D="D13" and value="200"
-
-## Type 2: FG (Foundation Girder / 地中梁 or フーチング)
-These images show a table format with:
-- Row "符号" (Symbol) contains the frame name (e.g., "FG1", "FG1A")
-- Row "位 置" shows location info (e.g., "X4,X14,Y1,Y5通り" or "Y7通り") - these are different locations for the SAME frame
-- Row "B×D" contains dimensions directly (e.g., "500x500") → Split into B="500" and H="500"
-- Row "上端筋" (Top reinforcement) contains values like "4-D25" or "6-D25"
-- Row "下端筋" (Bottom reinforcement) contains values like "4-D25" or "6-D25"
-- Row "St." (Stirrup reinforcement) contains values like "□-D13@100" or "-D13@100"
-- Extract: Split "4-D25" into D="D25" and value="4"
-- Extract St.: Split "□-D13@100" into D="D13" and value="100" (ignore the □ symbol)
-
-**IMPORTANT: When FG has multiple columns (multiple 位置), the values are typically the SAME. Extract ONLY ONE entry per frame name (符号) using values from the FIRST (leftmost) column. Do NOT create separate entries for each column.**
-
-**EXTRACTION RULES:**
-
-1. **Determine the frame type:**
-   - If you see "FW" in the name OR the image shows a wall cross-section diagram → Type FW
-   - If you see "FG" in the name OR the image shows a table with 符号, B×D, 上端筋, 下端筋 → Type FG
-
-2. **For FW type:**
-   - frameName: The "FW..." label at the top
-   - b: The bottom width dimension (e.g., "300")
-   - h: The left vertical height dimension (e.g., "350")
-   - topRebarD: From ﾖｺ, the rebar size (e.g., "D13" from "D13@200")
-   - topRebarValue: From ﾖｺ, the spacing (e.g., "200" from "D13@200")
-   - bottomRebarD: From ﾀﾃ, the rebar size (e.g., "D13" from "D13@200")
-   - bottomRebarValue: From ﾀﾃ, the spacing (e.g., "200" from "D13@200")
-   - stirrupD: Leave BLANK (empty string "") - FW doesn't have St. field
-   - stirrupValue: Leave BLANK (empty string "") - FW doesn't have St. field
-
-3. **For FG type:**
-   - frameName: Value from 符号 row (e.g., "FG1") - extract ONCE per unique 符号
-   - b: First value from B×D from the FIRST column (e.g., "500" from "500x500")
-   - h: Second value from B×D from the FIRST column (e.g., "500" from "500x500")
-   - topRebarD: From 上端筋 FIRST column, the rebar size (e.g., "D25" from "4-D25")
-   - topRebarValue: From 上端筋 FIRST column, the count (e.g., "4" from "4-D25")
-   - bottomRebarD: From 下端筋 FIRST column, the rebar size (e.g., "D25" from "4-D25")
-   - bottomRebarValue: From 下端筋 FIRST column, the count (e.g., "4" from "4-D25")
-   - stirrupD: From St. FIRST column, the rebar size (e.g., "D13" from "□-D13@100")
-   - stirrupValue: From St. FIRST column, the spacing value (e.g., "100" from "□-D13@100")
-
-4. **For each unique frame name (符号), output ONLY ONE entry. Multiple columns with different 位置 but same 符号 should be treated as ONE frame.**
-
-5. **Remove any material specifications in parentheses like (SD345) or (SD295).**
-${SPATIAL_INSTRUCTION_IMAGE}
-**Output a valid JSON array based on the schema provided.**
-`;
-
+export const FRAME_SYSTEM_PROMPT = [
+  'You are a structural engineering data extraction specialist. Extract one JSON row per unique FW or FG symbol from a Japanese structural CAD drawing.',
+  '',
+  'Every row must include frameType (FW or FG), frameName, b, and h. b and h use the drawing dimensions: FW uses the current bottom width and left wall-height logic; FG splits B×D into b and h.',
+  '',
+  'FW output fields:',
+  '- FW_ベース筋_直径 (fwBaseRebarDiameter): always 13.',
+  '- FW_タテ筋_直径 (fwVerticalRebarDiameter): numeric value after D in the タテ callout. If no callout exists, default 13.',
+  '- FW_ヨコ筋_本数 (fwHorizontalRebarCount): count only the white circles left of the vertical white line and below the left extended green line. Return 0 when none exist.',
+  '- FW_ヨコ筋_直径 (fwHorizontalRebarDiameter): numeric value after D in the ヨコ callout. If no callout exists, default 10.',
+  '',
+  'FG output fields (all diameters are numeric values after D only, never include the D prefix):',
+  '- FG_上端筋_直径 (fgTopRebarDiameter) from 上端筋.',
+  '- FG_下端筋_直径 (fgBottomRebarDiameter) from 下端筋.',
+  '- FG_St_直径 (fgStirrupDiameter) and FG_St_距離_最大 (fgStirrupMaxDistance) from St.; the maximum distance is the numeric value after @.',
+  '- FG_腹筋_直径 (fgBellyRebarDiameter) from 腹筋.',
+  '- FG_巾止筋_直径 (fgWidthStopRebarDiameter) and FG_巾止筋_距離_最大 (fgWidthStopRebarMaxDistance) from 巾止筋; the maximum distance is the numeric value after @.',
+  '',
+  'For a logical FG symbol such as FG1B that is visually split into two subcolumns, return one row only. Its required diameter values are shared, so read them from either subcolumn. Do not create duplicate rows for locations.',
+  'Remove material specifications in parentheses. Return empty strings for unavailable optional FG fields.',
+  SPATIAL_INSTRUCTION_IMAGE,
+  'Output a valid JSON array based on the schema provided.',
+].join('\n');
 export const extractFrameData = async (base64Data: string, mimeType: string): Promise<FrameData[]> => {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
   
@@ -1002,45 +961,24 @@ export const extractFrameData = async (base64Data: string, mimeType: string): Pr
           items: {
             type: Type.OBJECT,
             properties: {
-              frameName: {
-                type: Type.STRING,
-                description: "The frame identifier (e.g., FW1, FG1, FG1A)"
-              },
-              b: {
-                type: Type.STRING,
-                description: "Width dimension B (e.g., '300', '500')"
-              },
-              h: {
-                type: Type.STRING,
-                description: "Height dimension H (e.g., '350', '500')"
-              },
-              topRebarD: {
-                type: Type.STRING,
-                description: "上端筋 rebar size (e.g., 'D13', 'D25')"
-              },
-              topRebarValue: {
-                type: Type.STRING,
-                description: "上端筋 value - spacing for FW (e.g., '200') or count for FG (e.g., '4')"
-              },
-              bottomRebarD: {
-                type: Type.STRING,
-                description: "下端筋 rebar size (e.g., 'D13', 'D25')"
-              },
-              bottomRebarValue: {
-                type: Type.STRING,
-                description: "下端筋 value - spacing for FW (e.g., '200') or count for FG (e.g., '4')"
-              },
-              stirrupD: {
-                type: Type.STRING,
-                description: "St. rebar size (e.g., 'D13') - FG only, empty string for FW"
-              },
-              stirrupValue: {
-                type: Type.STRING,
-                description: "St. spacing value (e.g., '100') - FG only, empty string for FW"
-              },
+              frameType: { type: Type.STRING, description: "Frame type: FW or FG" },
+              frameName: { type: Type.STRING, description: "The frame identifier (for example FW1 or FG1B)" },
+              b: { type: Type.STRING, description: "Width dimension B" },
+              h: { type: Type.STRING, description: "Height dimension H" },
+              fwBaseRebarDiameter: { type: Type.STRING, description: "FW_ベース筋_直径: numeric only, always 13" },
+              fwVerticalRebarDiameter: { type: Type.STRING, description: "FW_タテ筋_直径: numeric value after D" },
+              fwHorizontalRebarCount: { type: Type.STRING, description: "FW_ヨコ筋_本数: qualifying white circle count" },
+              fwHorizontalRebarDiameter: { type: Type.STRING, description: "FW_ヨコ筋_直径: numeric value after D" },
+              fgTopRebarDiameter: { type: Type.STRING, description: "FG_上端筋_直径: numeric value after D" },
+              fgBottomRebarDiameter: { type: Type.STRING, description: "FG_下端筋_直径: numeric value after D" },
+              fgStirrupDiameter: { type: Type.STRING, description: "FG_St_直径: numeric value after D" },
+              fgStirrupMaxDistance: { type: Type.STRING, description: "FG_St_距離_最大: maximum distance" },
+              fgBellyRebarDiameter: { type: Type.STRING, description: "FG_腹筋_直径: numeric value after D" },
+              fgWidthStopRebarDiameter: { type: Type.STRING, description: "FG_巾止筋_直径: numeric value after D" },
+              fgWidthStopRebarMaxDistance: { type: Type.STRING, description: "FG_巾止筋_距離_最大: maximum distance" },
               bbox: bboxSchemaTyped,
             },
-            required: ['frameName', 'b', 'h', 'topRebarD', 'topRebarValue', 'bottomRebarD', 'bottomRebarValue', 'stirrupD', 'stirrupValue']
+            required: ['frameType', 'frameName', 'b', 'h']
           }
         }
       }
@@ -1071,36 +1009,18 @@ export const extractFrameData = async (base64Data: string, mimeType: string): Pr
       }
     }
 
-    // Validate each item has required fields
-    const validatedData = rawData.filter((item: any) => {
-      if (!item.frameName || !item.b || !item.h) {
-        console.warn('Skipping invalid frame data:', item);
-        return false;
-      }
-      return true;
-    });
+    const normalizedData = rawData
+      .map((item: Record<string, unknown>) =>
+        normalizeFrameData({ ...item, bbox: parseBoundingBox(item.bbox) }),
+      )
+      .filter((item): item is FrameData => item !== null);
 
-    if (validatedData.length === 0) {
+    if (normalizedData.length === 0) {
       throw new Error('No valid frame data found in response');
     }
 
-    console.log(`Extracted ${validatedData.length} frame(s) from image`);
-
-    // Post-processing: Clean any remaining parentheses content
-    const cleanValue = (val: string) => val?.replace(/\s*[\(（].*?[\)）]/g, '').trim() || '';
-
-    return validatedData.map((item: any): FrameData => ({
-      frameName: item.frameName,
-      b: item.b,
-      h: item.h,
-      topRebarD: cleanValue(item.topRebarD),
-      topRebarValue: item.topRebarValue,
-      bottomRebarD: cleanValue(item.bottomRebarD),
-      bottomRebarValue: item.bottomRebarValue,
-      stirrupD: item.stirrupD,
-      stirrupValue: item.stirrupValue,
-      bbox: parseBoundingBox(item.bbox),
-    }));
+    console.log(`Extracted ${normalizedData.length} frame(s) from image`);
+    return normalizedData;
 
   } catch (error) {
     logError("Frame Extraction Error:", error);
