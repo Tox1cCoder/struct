@@ -13,7 +13,6 @@ import {
   FoundationPlanCoordinateData,
   FrameData,
   PriorityPipelineDiagnostics,
-  PriorityUsageSummary,
 } from "../types";
 import { parseBoundingBox, parsePage } from "../utils/boundingBox";
 import { normalizeFrameData } from "../utils/frameData";
@@ -43,9 +42,15 @@ import {
   selectPriorityPass,
 } from "../utils/foundationPriorityGeminiConfig";
 import {
+  addPriorityWarning,
   createPriorityDiagnostics,
   finishStage,
+  incrementPriorityCropCount,
   markEscalated,
+  recordPriorityAnchors,
+  recordPriorityCoverage,
+  recordPriorityRequest,
+  recordPriorityUsage,
 } from "../utils/foundationPriorityDiagnostics";
 
 const SPATIAL_INSTRUCTION_PDF = `
@@ -821,16 +826,6 @@ const createPriorityPdfPart = (source: PriorityPdfSource, mediaResolution: PartM
         mediaResolution: { level: mediaResolution },
       };
 
-const copyPriorityUsage = (usageMetadata: unknown): PriorityUsageSummary | undefined => {
-  if (!usageMetadata || typeof usageMetadata !== 'object') return undefined;
-  const source = usageMetadata as Record<string, unknown>;
-  const usage: PriorityUsageSummary = {};
-  for (const key of ['promptTokenCount', 'candidatesTokenCount', 'thoughtsTokenCount', 'totalTokenCount'] as const) {
-    if (typeof source[key] === 'number') usage[key] = source[key];
-  }
-  return Object.keys(usage).length > 0 ? usage : undefined;
-};
-
 const generateAgainstPriorityPdf = async (
   ai: GoogleGenAI,
   source: PriorityPdfSource,
@@ -852,7 +847,7 @@ const generateAgainstPriorityPdf = async (
   }
   return {
     raw: parseStructuredArrayResponse(JSON.parse(jsonText)),
-    usage: copyPriorityUsage(response.usageMetadata),
+    usage: response.usageMetadata,
   };
 };
 
@@ -867,24 +862,6 @@ const addStageDuration = (
       : diagnostics.stages.fallbackValidationMs ?? 0;
   return finishStage(diagnostics, stage, existing + durationMs);
 };
-
-const recordPriorityUsage = (
-  diagnostics: PriorityPipelineDiagnostics,
-  pass: 'primary' | 'escalated',
-  usage: PriorityUsageSummary | undefined,
-): PriorityPipelineDiagnostics => usage ? {
-  ...diagnostics,
-  usage: { ...diagnostics.usage, [pass]: usage },
-} : diagnostics;
-
-const recordPrioritySource = (
-  diagnostics: PriorityPipelineDiagnostics,
-  source: PriorityPdfSource,
-): PriorityPipelineDiagnostics => ({
-  ...diagnostics,
-  anchorMode: source.anchors.mode,
-  anchorCounts: { ...source.anchors.counts },
-});
 
 interface PriorityExtractionResult<T> {
   data: T[];
@@ -901,7 +878,8 @@ export const extractCertifiedCoordinateData = async (
   const result = await withPriorityPdf(ai, file, async (source, prepareMs, preprocessMs) => {
     diagnostics = finishStage(diagnostics, 'upload', prepareMs);
     diagnostics = finishStage(diagnostics, 'preprocess', preprocessMs);
-    diagnostics = recordPrioritySource(diagnostics, source);
+    diagnostics = recordPriorityAnchors(diagnostics, source.anchors);
+    diagnostics = recordPriorityRequest(diagnostics, 'primary', selectPriorityPass('primary'));
     const prompt = `${serializePriorityAnchorManifest(source.anchors)}\n\n${CERTIFIED_FOUNDATION_COORDINATE_PROMPT}`;
 
     const primaryStart = Date.now();
@@ -922,6 +900,7 @@ export const extractCertifiedCoordinateData = async (
 
     if (needsPriorityEscalation('certified', validated.length, validated.length)) {
       diagnostics = markEscalated(diagnostics, 'normalized-rows-empty');
+      diagnostics = recordPriorityRequest(diagnostics, 'escalated', selectPriorityPass('escalated'));
       logError(
         `Certified coordinate extraction returned unusable rows for ${file.name}. Primary raw sample:`,
         summarizeRawCoordinateRows(primaryRaw),
@@ -969,7 +948,8 @@ export const extractFoundationPlanCoordinateData = async (
   const result = await withPriorityPdf(ai, file, async (source, prepareMs, preprocessMs) => {
     diagnostics = finishStage(diagnostics, 'upload', prepareMs);
     diagnostics = finishStage(diagnostics, 'preprocess', preprocessMs);
-    diagnostics = recordPrioritySource(diagnostics, source);
+    diagnostics = recordPriorityAnchors(diagnostics, source.anchors);
+    diagnostics = recordPriorityRequest(diagnostics, 'primary', selectPriorityPass('primary'));
     const manifestedPrompt = `${serializePriorityAnchorManifest(source.anchors)}\n\n${FOUNDATION_PLAN_COORDINATE_PROMPT}`;
 
     const primaryStart = Date.now();
@@ -988,12 +968,13 @@ export const extractFoundationPlanCoordinateData = async (
     let validated = normalizeFoundationPlanCoordinateRows(primaryRaw);
     let coverage = evaluateFoundationPlanCoverage(source.anchors, validated);
     diagnostics = finishStage(diagnostics, 'primaryValidation', Date.now() - primaryValidateStart);
-    diagnostics = { ...diagnostics, coverage };
+    diagnostics = recordPriorityCoverage(diagnostics, coverage);
 
     if (!coverage.complete) {
       const targetLabels = [...new Set([...coverage.missingLabels, ...coverage.unresolvedLabels])]
         .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
       diagnostics = markEscalated(diagnostics, coverage.reasons.join(', '));
+      diagnostics = recordPriorityRequest(diagnostics, 'escalated', selectPriorityPass('escalated'));
 
       const targetSet = new Set(targetLabels);
       const cropResults = await Promise.allSettled(
@@ -1009,7 +990,7 @@ export const extractFoundationPlanCoordinateData = async (
             }]
           : [],
       );
-      diagnostics = { ...diagnostics, cropCount: cropParts.length };
+      diagnostics = incrementPriorityCropCount(diagnostics, cropParts.length);
 
       const targetInstruction = `TARGETED RETRY: Extract only these missing or unresolved foundation labels: ${targetLabels.join(', ')}. Return every readable support location for them. The attached PNG crops, when present, are high-resolution evidence for these labels.`;
       const fallbackStart = Date.now();
@@ -1030,18 +1011,19 @@ export const extractFoundationPlanCoordinateData = async (
         validated = normalizeFoundationPlanCoordinateRows(mergePriorityPlanRows(validated, targeted));
         coverage = evaluateFoundationPlanCoverage(source.anchors, validated);
         diagnostics = addStageDuration(diagnostics, 'fallbackValidation', Date.now() - fallbackValidateStart);
-        diagnostics = { ...diagnostics, coverage };
+        diagnostics = recordPriorityCoverage(diagnostics, coverage);
       } catch (error) {
         diagnostics = addStageDuration(diagnostics, 'fallbackGeneration', Date.now() - fallbackStart);
-        diagnostics = {
-          ...diagnostics,
-          warning: `Foundation coverage is incomplete because the targeted retry failed: ${error instanceof Error ? error.message : String(error)}`,
-        };
+        diagnostics = addPriorityWarning(
+          diagnostics,
+          `Foundation coverage is incomplete because the targeted retry failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 
     if (!validated.some((row) => row.planColumnType)) {
       diagnostics = markEscalated(diagnostics, 'no-visible-plan-codes');
+      diagnostics = recordPriorityRequest(diagnostics, 'escalated', selectPriorityPass('escalated'));
       const directTargets = [...new Set([
         ...coverage.missingLabels,
         ...coverage.unresolvedLabels,
@@ -1065,18 +1047,21 @@ export const extractFoundationPlanCoordinateData = async (
         validated = normalizeFoundationPlanCoordinateRows(mergePriorityPlanRows(validated, directRows));
         coverage = evaluateFoundationPlanCoverage(source.anchors, validated);
         diagnostics = addStageDuration(diagnostics, 'fallbackValidation', Date.now() - directValidateStart);
-        diagnostics = { ...diagnostics, coverage };
+        diagnostics = recordPriorityCoverage(diagnostics, coverage);
       } catch (error) {
         diagnostics = addStageDuration(diagnostics, 'fallbackGeneration', Date.now() - directStart);
-        diagnostics = {
-          ...diagnostics,
-          warning: diagnostics.warning ?? `Foundation direct mapping could not be completed: ${error instanceof Error ? error.message : String(error)}`,
-        };
+        if (!diagnostics.warning) {
+          diagnostics = addPriorityWarning(
+            diagnostics,
+            `Foundation direct mapping could not be completed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
 
       if (!validated.some((row) => row.planColumnType)) {
         logError(
           `Foundation plan direct mapping fallback returned no code-bearing rows for ${file.name}.`,
+          'No code-bearing rows returned.',
         );
       }
     }
@@ -1086,13 +1071,15 @@ export const extractFoundationPlanCoordinateData = async (
     }
 
     coverage = evaluateFoundationPlanCoverage(source.anchors, validated);
-    diagnostics = { ...diagnostics, coverage };
+    diagnostics = recordPriorityCoverage(diagnostics, coverage);
     if (!coverage.complete) {
       const labels = [...coverage.missingLabels, ...coverage.unresolvedLabels];
-      diagnostics = {
-        ...diagnostics,
-        warning: diagnostics.warning ?? `Foundation coverage is incomplete${labels.length ? `; missing or unresolved: ${labels.join(', ')}` : ''}.`,
-      };
+      if (!diagnostics.warning) {
+        diagnostics = addPriorityWarning(
+          diagnostics,
+          `Foundation coverage is incomplete${labels.length ? `; missing or unresolved: ${labels.join(', ')}` : ''}.`,
+        );
+      }
     }
 
     return validated;
@@ -1230,7 +1217,7 @@ export const extractFrameData = async (base64Data: string, mimeType: string): Pr
       .map((item: Record<string, unknown>) =>
         normalizeFrameData({ ...item, bbox: parseBoundingBox(item.bbox) }),
       )
-      .filter((item): item is FrameData => item !== null);
+      .filter((item: FrameData | null): item is FrameData => item !== null);
 
     if (normalizedData.length === 0) {
       throw new Error('No valid frame data found in response');

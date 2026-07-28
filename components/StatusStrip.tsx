@@ -11,6 +11,8 @@ interface StatusStripFile {
   error?: string;
   durationMs?: number;
   passUsed?: 'primary' | 'escalated';
+  warning?: string;
+  missingLabels?: string[];
 }
 
 interface StatusStripProps {
@@ -53,7 +55,7 @@ export const StatusStrip: React.FC<StatusStripProps> = ({ results, accent, onRet
           </span>
         )}
       </div>
-      {(onRetry || onRemove || results.some((r) => r.durationMs !== undefined || r.passUsed)) && (
+      {(onRetry || onRemove || results.some((r) => r.durationMs !== undefined || r.passUsed || r.warning)) && (
         <ul className="mt-2 space-y-0.5 text-[11px] text-gray-600">
           {results.map((r) => (
             <li key={r.id} className="flex items-center justify-between gap-2 truncate">
@@ -69,6 +71,14 @@ export const StatusStrip: React.FC<StatusStripProps> = ({ results, accent, onRet
                 )}
                 {r.status === 'ERROR' && (
                   <span className="ml-2 text-red-600">{r.error ?? 'Unknown error'}</span>
+                )}
+                {r.status === 'SUCCESS' && r.warning && (
+                  <span className="ml-2 text-amber-700">
+                    {r.warning}
+                    {r.missingLabels && r.missingLabels.length > 0
+                      ? ` — ${r.missingLabels.slice(0, 5).join(', ')}${r.missingLabels.length > 5 ? ` + ${r.missingLabels.length - 5} more` : ''}`
+                      : ''}
+                  </span>
                 )}
               </span>
               <span className="flex items-center gap-2">

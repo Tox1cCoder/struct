@@ -35,7 +35,6 @@ import {
   FrameData,
 } from './types';
 import { getErrorMessage, logError } from './utils/errorHandling';
-import { mergeReinforcementWithFoundation } from './utils/mergeData';
 import { buildFoundationPriorityText } from './utils/mergeFoundationPriority';
 import { hasActiveJobs } from './utils/fileJobs';
 import { StatusStrip } from './components/StatusStrip';
@@ -136,11 +135,6 @@ const App: React.FC = () => {
           })),
         ),
     [reinfResults],
-  );
-
-  const mergedData = useMemo(
-    () => mergeReinforcementWithFoundation(consolidatedReinfData, foundationData),
-    [consolidatedReinfData, foundationData],
   );
 
   const [columnRows, setColumnRows] = useState<EditableRowsState<EditableExpandedReinforcementData>>({
@@ -863,6 +857,8 @@ const App: React.FC = () => {
                         ...r,
                         durationMs: r.diagnostics?.stages.totalMs,
                         passUsed: r.diagnostics?.passUsed,
+                        warning: r.diagnostics?.warning,
+                        missingLabels: r.diagnostics?.coverage?.missingLabels,
                       }))}
                       accent="indigo"
                     />
@@ -889,6 +885,8 @@ const App: React.FC = () => {
                         ...r,
                         durationMs: r.diagnostics?.stages.totalMs,
                         passUsed: r.diagnostics?.passUsed,
+                        warning: r.diagnostics?.warning,
+                        missingLabels: r.diagnostics?.coverage?.missingLabels,
                       }))}
                       accent="emerald"
                     />

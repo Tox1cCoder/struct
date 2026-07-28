@@ -1,5 +1,8 @@
-import { PriorityPipelineDiagnostics } from '../types';
+import { PriorityPipelineDiagnostics, PriorityUsageSummary } from '../types';
+import type { GeminiRequestPolicy } from '../services/geminiRequestPolicy';
+import type { PriorityCoverageResult } from './foundationPriorityCoverage';
 import { FOUNDATION_PRIORITY_MODEL } from './foundationPriorityGeminiConfig';
+import type { PdfAnchorInventory } from './pdfTextAnchors';
 
 type StageKey = 'preprocess' | 'upload' | 'primaryGeneration' | 'primaryValidation' | 'fallbackGeneration' | 'fallbackValidation' | 'total';
 
@@ -50,3 +53,55 @@ export const markEscalated = (
   passUsed: 'escalated',
   escalationReason: reason,
 });
+
+export const recordPriorityRequest = (
+  diag: PriorityPipelineDiagnostics,
+  pass: 'primary' | 'escalated',
+  policy: GeminiRequestPolicy,
+): PriorityPipelineDiagnostics => ({
+  ...diag,
+  model: policy.model,
+  passUsed: pass,
+});
+
+export const recordPriorityAnchors = (
+  diag: PriorityPipelineDiagnostics,
+  inventory: PdfAnchorInventory,
+): PriorityPipelineDiagnostics => ({
+  ...diag,
+  anchorMode: inventory.mode,
+  anchorCounts: { ...inventory.counts },
+});
+
+export const recordPriorityCoverage = (
+  diag: PriorityPipelineDiagnostics,
+  coverage: PriorityCoverageResult,
+): PriorityPipelineDiagnostics => {
+  const { complete: _complete, reasons: _reasons, ...coverageDiagnostics } = coverage;
+  return { ...diag, coverage: coverageDiagnostics };
+};
+
+export const recordPriorityUsage = (
+  diag: PriorityPipelineDiagnostics,
+  pass: 'primary' | 'escalated',
+  usageMetadata: unknown,
+): PriorityPipelineDiagnostics => {
+  if (!usageMetadata || typeof usageMetadata !== 'object') return diag;
+  const source = usageMetadata as Record<string, unknown>;
+  const usage: PriorityUsageSummary = {};
+  for (const key of ['promptTokenCount', 'candidatesTokenCount', 'thoughtsTokenCount', 'totalTokenCount'] as const) {
+    if (typeof source[key] === 'number') usage[key] = source[key];
+  }
+  if (Object.keys(usage).length === 0) return diag;
+  return { ...diag, usage: { ...diag.usage, [pass]: usage } };
+};
+
+export const addPriorityWarning = (
+  diag: PriorityPipelineDiagnostics,
+  warning: string,
+): PriorityPipelineDiagnostics => ({ ...diag, warning });
+
+export const incrementPriorityCropCount = (
+  diag: PriorityPipelineDiagnostics,
+  count: number,
+): PriorityPipelineDiagnostics => ({ ...diag, cropCount: diag.cropCount + count });

@@ -28,6 +28,10 @@ describe('App foundation priority tab', () => {
       diagnostics: {
         fileName: 'trai.pdf',
         role: 'certified',
+        model: 'gemini-3.1-pro-preview',
+        anchorMode: 'unavailable',
+        anchorCounts: { foundation: 0, 'plan-column': 0, 'certified-column': 0, 'x-axis': 0, 'y-axis': 0 },
+        cropCount: 0,
         stages: { totalMs: 1000 },
         passUsed: 'primary',
       },
@@ -37,6 +41,10 @@ describe('App foundation priority tab', () => {
       diagnostics: {
         fileName: 'phai.pdf',
         role: 'plan',
+        model: 'gemini-3.1-pro-preview',
+        anchorMode: 'unavailable',
+        anchorCounts: { foundation: 0, 'plan-column': 0, 'certified-column': 0, 'x-axis': 0, 'y-axis': 0 },
+        cropCount: 0,
         stages: { totalMs: 1000 },
         passUsed: 'primary',
       },
@@ -75,6 +83,10 @@ describe('App foundation priority tab', () => {
       diagnostics: {
         fileName: 'phai.pdf',
         role: 'plan',
+        model: 'gemini-3.1-pro-preview',
+        anchorMode: 'unavailable',
+        anchorCounts: { foundation: 0, 'plan-column': 0, 'certified-column': 0, 'x-axis': 0, 'y-axis': 0 },
+        cropCount: 0,
         stages: { totalMs: 1000 },
         passUsed: 'primary',
       },
@@ -92,6 +104,37 @@ describe('App foundation priority tab', () => {
 
     expect(await screen.findByText('No resolved foundation mappings yet.')).toBeInTheDocument();
     expect(screen.queryByLabelText('F1 codes')).not.toBeInTheDocument();
+  });
+
+  it('shows incomplete plan coverage as a warning while keeping the file successful', async () => {
+    vi.mocked(extractFoundationPlanCoordinateData).mockResolvedValue({
+      data: [{ foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: 'FC1' }],
+      diagnostics: {
+        fileName: 'phai.pdf',
+        role: 'plan',
+        model: 'gemini-3.1-pro-preview',
+        anchorMode: 'native',
+        anchorCounts: { foundation: 3, 'plan-column': 1, 'certified-column': 0, 'x-axis': 1, 'y-axis': 1 },
+        cropCount: 2,
+        coverage: {
+          mode: 'anchored', expectedCount: 3, returnedCount: 1,
+          coordinateCount: 1, codeCount: 1, missingLabels: ['F2', 'F3'], unresolvedLabels: [],
+        },
+        warning: 'Foundation coverage is incomplete',
+        stages: { totalMs: 1000 },
+        passUsed: 'escalated',
+      },
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getAllByRole('button', { name: /Foundation Priority/i })[0]);
+    fireEvent.change(screen.getByLabelText('Upload Foundation Plan PDFs'), {
+      target: { files: [new File(['plan'], 'phai.pdf', { type: 'application/pdf' })] },
+    });
+
+    expect(await screen.findByText(/Foundation coverage is incomplete/)).toBeInTheDocument();
+    expect(screen.getByText(/F2, F3/)).toBeInTheDocument();
+    expect(screen.getByText('1 ok')).toBeInTheDocument();
   });
 
   it('renders separate FW and FG schedules when both types are uploaded', async () => {
