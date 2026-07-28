@@ -14,9 +14,10 @@ const generateContent = vi.fn();
 const filesUpload = vi.fn();
 const filesGet = vi.fn();
 const filesDelete = vi.fn();
-const { extractPriorityPdfAnchors, renderPdfAnchorCrop } = vi.hoisted(() => ({
+const { extractPriorityPdfAnchors, renderPdfAnchorCrop, renderPdfRegionCrops } = vi.hoisted(() => ({
   extractPriorityPdfAnchors: vi.fn(),
   renderPdfAnchorCrop: vi.fn(),
+  renderPdfRegionCrops: vi.fn(),
 }));
 
 vi.mock('@google/genai', () => ({
@@ -42,7 +43,7 @@ vi.mock('../utils/pdfTextAnchors', async (importOriginal) => ({
   extractPriorityPdfAnchors,
 }));
 
-vi.mock('../utils/pdfAnchorCrop', () => ({ renderPdfAnchorCrop }));
+vi.mock('../utils/pdfAnchorCrop', () => ({ renderPdfAnchorCrop, renderPdfRegionCrops }));
 
 const CERTIFIED_ROWS = [{ xAxis: 'X1', yAxis: 'Y1', columnType: 'C3009' }];
 
@@ -55,6 +56,7 @@ const fileOfSize = (bytes: number, name = 'doc.pdf') => {
 
 let extractCertifiedCoordinateData: typeof import('./geminiService')['extractCertifiedCoordinateData'];
 let extractFoundationPlanCoordinateData: typeof import('./geminiService')['extractFoundationPlanCoordinateData'];
+let extractJoinedFoundationPriorityPlanData: typeof import('./geminiService')['extractJoinedFoundationPriorityPlanData'];
 
 const planRow = (foundation: string, xAxis: string, yAxis: string, planColumnType: string) => ({
   foundation,
@@ -93,15 +95,36 @@ beforeEach(async () => {
   filesDelete.mockReset();
   extractPriorityPdfAnchors.mockReset();
   renderPdfAnchorCrop.mockReset();
+  renderPdfRegionCrops.mockReset();
   generateContent.mockResolvedValue({ text: JSON.stringify(CERTIFIED_ROWS) });
   extractPriorityPdfAnchors.mockResolvedValue(anchoredInventory());
   renderPdfAnchorCrop.mockResolvedValue({ data: 'crop-base64', mimeType: 'image/png' });
+  renderPdfRegionCrops.mockResolvedValue(Array.from({ length: 4 }, (_, index) => ({ data: `region-${index}`, mimeType: 'image/png' })));
   // Re-import per test so the module's cached client picks up the fresh mocks.
   vi.resetModules();
-  ({ extractCertifiedCoordinateData, extractFoundationPlanCoordinateData } = await import('./geminiService'));
+  ({ extractCertifiedCoordinateData, extractFoundationPlanCoordinateData, extractJoinedFoundationPriorityPlanData } = await import('./geminiService'));
 });
 
 describe('Foundation Priority coverage orchestration', () => {
+  it('joins paired PDFs through four parallel region requests with FC precedence', async () => {
+    generateContent.mockResolvedValue({ text: JSON.stringify([
+      { foundation: 'F1', codes: ["1'C1"] },
+      { foundation: 'F1A', codes: ['1C4', 'FC1'] },
+      { foundation: 'F2', codes: ['P1'] },
+    ]) });
+
+    const result = await extractJoinedFoundationPriorityPlanData(
+      fileOfSize(2_858_044, 'certified.pdf'),
+      fileOfSize(116_249, 'plan.pdf'),
+    );
+
+    expect(generateContent).toHaveBeenCalledTimes(4);
+    expect(result.data.filter((row) => row.foundation === 'F1A').map((row) => row.planColumnType)).toEqual(['FC1']);
+    expect(result.data.filter((row) => row.foundation === 'F1').map((row) => row.planColumnType)).toEqual(['1C1']);
+    expect(result.diagnostics.cropCount).toBe(8);
+    expect(result.diagnostics.model).toBe('gemini-3.1-pro-preview');
+  });
+
   it('sends the PDF once with a compact anchor manifest', async () => {
     generateContent.mockResolvedValueOnce({ text: JSON.stringify([
       planRow('F1', 'X1', 'Y1', ''),

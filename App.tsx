@@ -18,6 +18,7 @@ import {
   extractDataFromPdf,
   extractFoundationPlanCoordinateData,
   extractFrameData,
+  extractJoinedFoundationPriorityPlanData,
 } from './services/geminiService';
 import {
   BoundingBox,
@@ -72,6 +73,7 @@ const App: React.FC = () => {
 
   const [certifiedResults, setCertifiedResults] = useState<CertifiedCoordinateFileResult[]>([]);
   const [foundationPlanResults, setFoundationPlanResults] = useState<FoundationPlanCoordinateFileResult[]>([]);
+  const latestCertifiedPriorityFile = useRef<File | null>(null);
 
   const isReinfProcessing = hasActiveJobs(reinfResults);
   const isFrameProcessing = hasActiveJobs(frameResults);
@@ -428,6 +430,7 @@ const App: React.FC = () => {
   const handleCertifiedFilesSelect = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return;
+      latestCertifiedPriorityFile.current = files[files.length - 1];
       const newEntries: CertifiedCoordinateFileResult[] = files.map((file) => ({
         id: Math.random().toString(36).substring(7),
         fileName: file.name,
@@ -449,7 +452,18 @@ const App: React.FC = () => {
       prev.map((r) => (r.id === id ? { ...r, status: 'PROCESSING' } : r)),
     );
     try {
-      const { data, diagnostics } = await extractFoundationPlanCoordinateData(file);
+      let extraction;
+      if (latestCertifiedPriorityFile.current) {
+        try {
+          extraction = await extractJoinedFoundationPriorityPlanData(latestCertifiedPriorityFile.current, file);
+        } catch (joinedError) {
+          logError(`Joint priority extraction failed for ${file.name}; using plan-only fallback`, joinedError, { handled: true });
+          extraction = await extractFoundationPlanCoordinateData(file);
+        }
+      } else {
+        extraction = await extractFoundationPlanCoordinateData(file);
+      }
+      const { data, diagnostics } = extraction;
       setFoundationPlanResults((prev) =>
         prev.map((r) => (r.id === id ? { ...r, status: 'SUCCESS', data, diagnostics } : r)),
       );

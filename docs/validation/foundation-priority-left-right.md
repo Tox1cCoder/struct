@@ -1,6 +1,6 @@
 # Foundation Priority Validation — Left.pdf / Right.pdf
 
-**Status:** Source review recorded. Live post-change runs remain to be recorded.
+**Status:** Automated source review and live API candidate runs recorded on 2026-07-28. Browser click-through remains pending because no in-app browser was available in the verification environment.
 
 ## Inputs
 
@@ -49,8 +49,19 @@ F10: 1C1
 
 | File | Pass used | Upload (s) | Primary gen (s) | Primary validate (s) | Fallback gen (s) | Fallback validate (s) | Total (s) |
 | ---- | --------- | ---------- | --------------- | -------------------- | ---------------- | --------------------- | --------- |
-| Left.pdf | | | | | | | |
-| Right.pdf | | | | | | | |
+| Left.pdf, legacy independent run 1 | primary | 0.3 | 46.8 | <0.1 | — | — | 47.1 |
+| Right.pdf, legacy independent run 1 | escalated | 0.1 | 35.5 | <0.1 | 24.0 | <0.1 | 59.5 |
+| Left.pdf, legacy independent run 2 | primary | 0.4 | 23.3 | <0.1 | — | — | 23.7 |
+| Right.pdf, legacy independent run 2 | escalated | 0.1 | 41.1 | <0.1 | 74.1 | <0.1 | 115.3 |
+
+The independent-coordinate pipeline achieved full label coverage but only 1/13 exact reviewed resolved mappings in both runs. It was therefore rejected despite passing its structural coverage gate.
+
+The replacement paired-quadrant pipeline renders four corresponding high-resolution regions from page 1 of both PDFs and sends the four region pairs concurrently to Gemini 3.1 Pro Preview with medium thinking. Live candidate results:
+
+| Run | Wall time | Exact reviewed resolved mappings | Notes |
+| --- | --------- | -------------------------------- | ----- |
+| 1 | 81.1 s | 10/13 | FC precedence applied; remaining errors concentrated in F2/F9/F4 aggregation. |
+| 2 | 77.6 s | 11/13 | Exact-grid prompt recovered F2 and F4; F1 had one extra candidate and F9 remained incorrect. |
 
 ## Evidence coverage
 
@@ -76,13 +87,15 @@ F10: 1C1
 
 | Candidate | Primary config | Escalation config | Run 1 outcome | Run 2 outcome | Accept? |
 | --------- | -------------- | ----------------- | ------------- | ------------- | ------- |
-| A | 3.1 Pro MEDIUM thinking / MEDIUM media | 3.1 Pro HIGH / MEDIUM media | | | |
-| B | 3.1 Pro HIGH / MEDIUM media | same | | | |
-| C | A + refined prompt | 3.1 Pro HIGH / MEDIUM | | | |
+| A | Independent 3.1 Pro MEDIUM / MEDIUM PDFs | 3.1 Pro HIGH / MEDIUM PDF | 1/13, 106.6 s | 1/13, 139.0 s | No |
+| B | Joint 3.1 Pro MEDIUM / HIGH full-page images | none | 3/13, 68.3 s | — | No |
+| C | Four parallel joint quadrants, 3.1 Pro MEDIUM / HIGH images | none | 10/13, 81.1 s | 11/13, 77.6 s | Yes, best measured candidate |
 
 ## Decision
 
-(Final accepted config and reasoning after candidate runs)
+Use candidate C when both source PDFs are available, with deterministic native plan-label inventory, code canonicalization, and FC precedence. Keep the independent PDF pipeline as a fallback when paired browser rendering is unavailable.
+
+This is a material accuracy and latency improvement, but not a claim of perfect extraction: the two live runs reached 10/13 and 11/13 exact reviewed resolved rows. The UI must continue to expose warnings/evidence, and F1/F9 should receive manual review for this sample.
 
 ## Automated regression record (2026-05-28)
 

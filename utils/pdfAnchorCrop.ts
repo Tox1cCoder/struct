@@ -57,6 +57,46 @@ export interface PdfAnchorCrop {
   mimeType: 'image/png';
 }
 
+export const renderPdfRegionCrops = async (
+  file: File,
+  boxes: BoundingBox[],
+  scale = 4,
+): Promise<PdfAnchorCrop[]> => {
+  let documentProxy: { getPage: (page: number) => Promise<any>; destroy: () => Promise<void> } | undefined;
+  try {
+    const data = new Uint8Array(await readFileAsArrayBuffer(file));
+    documentProxy = await pdfjs.getDocument({ data }).promise;
+    const page = await documentProxy.getPage(1);
+    const viewport = page.getViewport({ scale });
+    const pageCanvas = document.createElement('canvas');
+    pageCanvas.width = Math.ceil(viewport.width);
+    pageCanvas.height = Math.ceil(viewport.height);
+    const pageContext = pageCanvas.getContext('2d');
+    if (!pageContext) throw new Error('page canvas context unavailable');
+    await page.render({ canvas: pageCanvas, canvasContext: pageContext, viewport }).promise;
+
+    return boxes.map((box) => {
+      const sourceX = Math.floor((box.xmin / 1000) * pageCanvas.width);
+      const sourceY = Math.floor((box.ymin / 1000) * pageCanvas.height);
+      const sourceWidth = Math.max(1, Math.ceil(((box.xmax - box.xmin) / 1000) * pageCanvas.width));
+      const sourceHeight = Math.max(1, Math.ceil(((box.ymax - box.ymin) / 1000) * pageCanvas.height));
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = sourceWidth;
+      cropCanvas.height = sourceHeight;
+      const context = cropCanvas.getContext('2d');
+      if (!context) throw new Error('crop canvas context unavailable');
+      context.drawImage(pageCanvas, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
+      const encoded = cropCanvas.toDataURL('image/png').split(',', 2)[1];
+      if (!encoded) throw new Error('PNG encoding failed');
+      return { data: encoded, mimeType: 'image/png' as const };
+    });
+  } catch (error) {
+    throw new Error(`Could not render PDF region crops: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    await documentProxy?.destroy().catch(() => undefined);
+  }
+};
+
 export const renderPdfAnchorCrop = async (
   file: File,
   anchor: PdfTextAnchor,

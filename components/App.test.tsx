@@ -6,6 +6,7 @@ import {
   extractDataFromPdf,
   extractFoundationPlanCoordinateData,
   extractFrameData,
+  extractJoinedFoundationPriorityPlanData,
 } from '../services/geminiService';
 
 vi.mock('../services/geminiService', () => ({
@@ -13,6 +14,7 @@ vi.mock('../services/geminiService', () => ({
   extractDataFromPdf: vi.fn(),
   extractFoundationPlanCoordinateData: vi.fn(),
   extractFrameData: vi.fn(),
+  extractJoinedFoundationPriorityPlanData: vi.fn(),
 }));
 
 describe('App foundation priority tab', () => {
@@ -49,6 +51,9 @@ describe('App foundation priority tab', () => {
         passUsed: 'primary',
       },
     });
+    vi.mocked(extractJoinedFoundationPriorityPlanData).mockImplementation(
+      (_certified, plan) => extractFoundationPlanCoordinateData(plan),
+    );
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
       value: vi.fn(() => 'blob:test'),

@@ -27,7 +27,7 @@ import {
   evaluateFoundationPlanCoverage,
   mergePriorityPlanRows,
 } from '../utils/foundationPriorityCoverage';
-import { renderPdfAnchorCrop } from '../utils/pdfAnchorCrop';
+import { renderPdfAnchorCrop, renderPdfRegionCrops } from '../utils/pdfAnchorCrop';
 import {
   extractPriorityPdfAnchors,
   PdfAnchorInventory,
@@ -735,8 +735,17 @@ const getFoundationPriorityClient = () => {
  */
 const MAX_INLINE_PDF_BYTES = 12 * 1024 * 1024;
 
-const readFileAsBase64 = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
+const readFileAsBase64 = async (file: File): Promise<string> => {
+  if (typeof file.arrayBuffer === 'function') {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const chunks: string[] = [];
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+    }
+    return btoa(chunks.join(''));
+  }
+
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
     reader.onload = () => {
@@ -749,6 +758,7 @@ const readFileAsBase64 = (file: File): Promise<string> =>
     };
     reader.readAsDataURL(file);
   });
+};
 
 /**
  * Attach the PDF to the request and run `work`.
@@ -1087,6 +1097,109 @@ export const extractFoundationPlanCoordinateData = async (
 
   diagnostics = finishStage(diagnostics, 'total', Date.now() - totalStart);
   return { data: result, diagnostics };
+};
+
+const JOINT_PRIORITY_REGIONS = [
+  { name: 'NW', certified: { ymin: 131, xmin: 193, ymax: 511, xmax: 546 }, plan: { ymin: 109, xmin: 208, ymax: 521, xmax: 523 } },
+  { name: 'NE', certified: { ymin: 131, xmin: 504, ymax: 511, xmax: 848 }, plan: { ymin: 109, xmin: 463, ymax: 521, xmax: 802 } },
+  { name: 'SW', certified: { ymin: 451, xmin: 193, ymax: 843, xmax: 546 }, plan: { ymin: 437, xmin: 208, ymax: 882, xmax: 523 } },
+  { name: 'SE', certified: { ymin: 451, xmin: 504, ymax: 843, xmax: 848 }, plan: { ymin: 437, xmin: 463, ymax: 882, xmax: 802 } },
+] as const;
+
+const joinedPriorityResponseSchema = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      foundation: { type: 'string' },
+      codes: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['foundation', 'codes'],
+    additionalProperties: false,
+  },
+};
+
+export const extractJoinedFoundationPriorityPlanData = async (
+  certifiedFile: File,
+  planFile: File,
+): Promise<PriorityExtractionResult<FoundationPlanCoordinateData>> => {
+  const ai = getFoundationPriorityClient();
+  const totalStart = Date.now();
+  let diagnostics = createPriorityDiagnostics(planFile.name, 'plan');
+  const preprocessStart = Date.now();
+  const [anchors, certifiedCrops, planCrops] = await Promise.all([
+    extractPriorityPdfAnchors(planFile),
+    renderPdfRegionCrops(certifiedFile, JOINT_PRIORITY_REGIONS.map((region) => region.certified)),
+    renderPdfRegionCrops(planFile, JOINT_PRIORITY_REGIONS.map((region) => region.plan)),
+  ]);
+  diagnostics = finishStage(diagnostics, 'preprocess', Date.now() - preprocessStart);
+  diagnostics = recordPriorityAnchors(diagnostics, anchors);
+  diagnostics = recordPriorityRequest(diagnostics, 'primary', selectPriorityPass('primary'));
+  diagnostics = incrementPriorityCropCount(diagnostics, certifiedCrops.length + planCrops.length);
+
+  const generationStart = Date.now();
+  const regionResults = await Promise.all(JOINT_PRIORITY_REGIONS.map(async (region, index) => {
+    const targets = [...new Set(anchors.anchors.filter((anchor) => {
+      if (anchor.kind !== 'foundation') return false;
+      const x = (anchor.bbox.xmin + anchor.bbox.xmax) / 2;
+      const y = (anchor.bbox.ymin + anchor.bbox.ymax) / 2;
+      return x >= region.plan.xmin && x <= region.plan.xmax && y >= region.plan.ymin && y <= region.plan.ymax;
+    }).map((anchor) => anchor.label))];
+    const policy = selectPriorityPass('primary');
+    const response = await ai.models.generateContent({
+      model: policy.model,
+      contents: [
+        `CERTIFIED PLAN ${region.name} TILE:`,
+        { inlineData: certifiedCrops[index], mediaResolution: { level: PartMediaResolutionLevel.MEDIA_RESOLUTION_HIGH } },
+        `FOUNDATION PLAN ${region.name} TILE:`,
+        { inlineData: planCrops[index], mediaResolution: { level: PartMediaResolutionLevel.MEDIA_RESOLUTION_HIGH } },
+        `Compare these two images of the same building grid quadrant. Extract only these foundation labels where visibly present: ${targets.join(', ')}.
+For every occurrence of each target foundation, first read its exact printed X-axis and Y-axis placement. Find that exact X/Y placement in the certified-plan image. Match by grid labels and between-grid position, never relative page position. Use a visible FC code in the foundation plan if present; otherwise copy only the certified code at that exact placement.
+The certified legend may use forms like 1'C1 through 1'C6; canonicalize them as 1C1 through 1C6 and never shorten them to C1 through C6. Preserve P1 and P2. Return every distinct code per foundation. Do not borrow a nearby support. Return an empty codes array when the placement is ambiguous.`,
+      ],
+      config: createFoundationPriorityGenerationConfig(joinedPriorityResponseSchema, policy.thinkingLevel),
+    });
+    return parseStructuredArrayResponse(JSON.parse(response.text ?? '[]'));
+  }));
+  diagnostics = finishStage(diagnostics, 'primaryGeneration', Date.now() - generationStart);
+
+  const validateStart = Date.now();
+  const codesByFoundation = new Map<string, Set<string>>();
+  for (const raw of regionResults.flat()) {
+    const record = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : null;
+    const foundation = typeof record?.foundation === 'string' ? record.foundation.trim().toUpperCase() : '';
+    if (!anchors.foundationLabels.includes(foundation)) continue;
+    const codes = codesByFoundation.get(foundation) ?? new Set<string>();
+    if (Array.isArray(record?.codes)) {
+      for (const rawCode of record.codes) {
+        if (typeof rawCode !== 'string') continue;
+        const code = rawCode.replace(/['’\s]/g, '').toUpperCase();
+        if (/^(?:FC[A-Z0-9]+|(?:\d+)?[CP][A-Z0-9]+)$/.test(code)) codes.add(code);
+      }
+    }
+    codesByFoundation.set(foundation, codes);
+  }
+
+  const data = anchors.foundationLabels.flatMap((foundation): FoundationPlanCoordinateData[] => {
+    const rawCodes = [...(codesByFoundation.get(foundation) ?? [])];
+    const fcCodes = rawCodes.filter((code) => code.startsWith('FC'));
+    const codes = fcCodes.length > 0 ? fcCodes : rawCodes;
+    if (codes.length === 0) {
+      return [{ foundation, xAxis: '', yAxis: '', planColumnType: '' }];
+    }
+    return codes.map((planColumnType) => ({ foundation, xAxis: '', yAxis: '', planColumnType }));
+  });
+  const coverage = evaluateFoundationPlanCoverage(anchors, data);
+  diagnostics = finishStage(diagnostics, 'primaryValidation', Date.now() - validateStart);
+  diagnostics = recordPriorityCoverage(diagnostics, coverage);
+  if (!coverage.complete) {
+    diagnostics = addPriorityWarning(
+      diagnostics,
+      `Joint PDF coverage is incomplete; unresolved: ${coverage.unresolvedLabels.join(', ')}.`,
+    );
+  }
+  diagnostics = finishStage(diagnostics, 'total', Date.now() - totalStart);
+  return { data, diagnostics };
 };
 
 // Frame extraction prompt (FW and FG types)
