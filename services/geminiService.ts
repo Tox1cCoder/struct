@@ -15,6 +15,7 @@ import {
 } from "../types";
 import { parseBoundingBox, parsePage } from "../utils/boundingBox";
 import { normalizeFrameData } from "../utils/frameData";
+import { FRAME_IMAGE_MODEL } from './geminiRequestPolicy';
 import {
   normalizeCertifiedCoordinateRows,
   normalizeFoundationPlanCoordinateRows,
@@ -975,7 +976,7 @@ export const extractFoundationPlanCoordinateData = async (
 };
 
 // Frame extraction prompt (FW and FG types)
-export const FRAME_MODEL = 'gemini-3.6-flash';
+export const FRAME_MODEL = FRAME_IMAGE_MODEL;
 export const FRAME_RESPONSE_REQUIRED_FIELDS = [
   'frameType',
   'frameName',

@@ -8,13 +8,13 @@ import {
 } from './foundationPriorityGeminiConfig';
 
 describe('Foundation Priority Gemini request config', () => {
-  it('uses HIGH thinking for both passes and bumps media resolution to HIGH on escalation', () => {
+  it('uses balanced primary thinking and keeps PDF media at MEDIUM on escalation', () => {
     expect(selectPriorityPass('primary')).toMatchObject({
       mediaResolution: PartMediaResolutionLevel.MEDIA_RESOLUTION_MEDIUM,
-      thinkingLevel: ThinkingLevel.HIGH,
+      thinkingLevel: ThinkingLevel.MEDIUM,
     });
     expect(selectPriorityPass('escalated')).toMatchObject({
-      mediaResolution: PartMediaResolutionLevel.MEDIA_RESOLUTION_HIGH,
+      mediaResolution: PartMediaResolutionLevel.MEDIA_RESOLUTION_MEDIUM,
       thinkingLevel: ThinkingLevel.HIGH,
     });
   });
