@@ -3,6 +3,7 @@ import {
   FileState,
   GoogleGenAI,
   Type,
+  type PartMediaResolutionLevel,
 } from "@google/genai";
 import {
   CertifiedCoordinateData,
@@ -154,6 +155,14 @@ type ActiveGeminiPdfFile = {
   uri: string;
   mimeType: string;
 };
+
+/**
+ * A PDF ready to be attached to a request, either as inline bytes or as a
+ * reference to a file already uploaded through the Files API.
+ */
+type PriorityPdfSource =
+  | { kind: 'inline'; base64: string; mimeType: string }
+  | { kind: 'uploaded'; active: ActiveGeminiPdfFile };
 
 export const CERTIFIED_FOUNDATION_COORDINATE_PROMPT = `
 You are reading one layer of a structural foundation drawing set: 認定柱脚資料.
@@ -695,16 +704,67 @@ const getFoundationPriorityClient = () => {
   return cachedFoundationPriorityClient;
 };
 
-const withActivePdf = async <T>(
+/**
+ * Largest PDF we attach inline. The Gemini API caps a whole request at 20 MB and
+ * base64 inflates bytes by 4/3, so this leaves room for the prompt and schema.
+ */
+const MAX_INLINE_PDF_BYTES = 12 * 1024 * 1024;
+
+const readFileAsBase64 = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error(`Could not read ${file.name} as base64.`));
+        return;
+      }
+      resolve(result.split(',')[1] ?? '');
+    };
+    reader.readAsDataURL(file);
+  });
+
+/**
+ * Attach the PDF to the request and run `work`.
+ *
+ * Inline bytes are the default: the Files API resumable-upload endpoint is
+ * routinely unreachable from a browser behind TLS-inspecting proxies or
+ * antivirus, which surfaces as an opaque `TypeError: Failed to fetch` — while
+ * the plain generateContent call to the same host works. Only files too large
+ * to inline fall back to uploading, which is also the only case that needs it.
+ */
+const withPriorityPdf = async <T>(
   ai: GoogleGenAI,
   file: File,
-  work: (active: ActiveGeminiPdfFile, uploadMs: number) => Promise<T>,
+  work: (source: PriorityPdfSource, prepareMs: number) => Promise<T>,
 ): Promise<T> => {
-  const uploadStart = Date.now();
-  const active = await uploadPdfAndWaitUntilActive(ai, file);
-  const uploadMs = Date.now() - uploadStart;
+  const prepareStart = Date.now();
+
+  if (file.size <= MAX_INLINE_PDF_BYTES) {
+    const base64 = await readFileAsBase64(file);
+    const source: PriorityPdfSource = {
+      kind: 'inline',
+      base64,
+      mimeType: file.type || 'application/pdf',
+    };
+    return work(source, Date.now() - prepareStart);
+  }
+
+  let active: ActiveGeminiPdfFile;
   try {
-    return await work(active, uploadMs);
+    active = await uploadPdfAndWaitUntilActive(ai, file);
+  } catch (error) {
+    throw new Error(
+      `${file.name} is ${(file.size / 1024 / 1024).toFixed(1)} MB, which is too large to send inline, ` +
+        `and uploading it to the Gemini Files API failed (${error instanceof Error ? error.message : String(error)}). ` +
+        `Split the PDF into parts under ${MAX_INLINE_PDF_BYTES / 1024 / 1024} MB and try again.`,
+    );
+  }
+  const prepareMs = Date.now() - prepareStart;
+
+  try {
+    return await work({ kind: 'uploaded', active }, prepareMs);
   } finally {
     try {
       await ai.files.delete({ name: active.name });
@@ -714,15 +774,24 @@ const withActivePdf = async <T>(
   }
 };
 
-const generateAgainstActivePdf = async (
+/** Build the PDF part, keeping the pass's media resolution either way. */
+const createPriorityPdfPart = (source: PriorityPdfSource, mediaResolution: PartMediaResolutionLevel) =>
+  source.kind === 'uploaded'
+    ? createPartFromUri(source.active.uri, source.active.mimeType, mediaResolution)
+    : {
+        inlineData: { mimeType: source.mimeType, data: source.base64 },
+        mediaResolution: { level: mediaResolution },
+      };
+
+const generateAgainstPriorityPdf = async (
   ai: GoogleGenAI,
-  active: ActiveGeminiPdfFile,
+  source: PriorityPdfSource,
   prompt: string,
   responseJsonSchema: object,
   pass: 'primary' | 'escalated',
 ) => {
   const passConfig = selectPriorityPass(pass);
-  const filePart = createPartFromUri(active.uri, active.mimeType, passConfig.mediaResolution);
+  const filePart = createPriorityPdfPart(source, passConfig.mediaResolution);
   const response = await ai.models.generateContent({
     model: passConfig.model,
     contents: createFoundationPriorityContents(filePart, prompt),
@@ -759,13 +828,13 @@ export const extractCertifiedCoordinateData = async (
   const totalStart = Date.now();
   let diagnostics = createPriorityDiagnostics(file.name, 'certified');
 
-  const result = await withActivePdf(ai, file, async (active, uploadMs) => {
-    diagnostics = finishStage(diagnostics, 'upload', uploadMs);
+  const result = await withPriorityPdf(ai, file, async (source, prepareMs) => {
+    diagnostics = finishStage(diagnostics, 'upload', prepareMs);
 
     const primaryStart = Date.now();
-    const primaryRaw = await generateAgainstActivePdf(
+    const primaryRaw = await generateAgainstPriorityPdf(
       ai,
-      active,
+      source,
       CERTIFIED_FOUNDATION_COORDINATE_PROMPT,
       certifiedCoordinateResponseSchema,
       'primary',
@@ -784,9 +853,9 @@ export const extractCertifiedCoordinateData = async (
       );
 
       const fallbackStart = Date.now();
-      const fallbackRaw = await generateAgainstActivePdf(
+      const fallbackRaw = await generateAgainstPriorityPdf(
         ai,
-        active,
+        source,
         CERTIFIED_FOUNDATION_COORDINATE_FALLBACK_PROMPT,
         certifiedCoordinateResponseSchema,
         'escalated',
@@ -820,13 +889,13 @@ export const extractFoundationPlanCoordinateData = async (
   const totalStart = Date.now();
   let diagnostics = createPriorityDiagnostics(file.name, 'plan');
 
-  const result = await withActivePdf(ai, file, async (active, uploadMs) => {
-    diagnostics = finishStage(diagnostics, 'upload', uploadMs);
+  const result = await withPriorityPdf(ai, file, async (source, prepareMs) => {
+    diagnostics = finishStage(diagnostics, 'upload', prepareMs);
 
     const primaryStart = Date.now();
-    const primaryRaw = await generateAgainstActivePdf(
+    const primaryRaw = await generateAgainstPriorityPdf(
       ai,
-      active,
+      source,
       FOUNDATION_PLAN_COORDINATE_PROMPT,
       foundationPlanCoordinateResponseSchema,
       'primary',
@@ -849,9 +918,9 @@ export const extractFoundationPlanCoordinateData = async (
       );
 
       const fallbackStart = Date.now();
-      const fallbackRaw = await generateAgainstActivePdf(
+      const fallbackRaw = await generateAgainstPriorityPdf(
         ai,
-        active,
+        source,
         FOUNDATION_PLAN_COORDINATE_FALLBACK_PROMPT,
         foundationPlanCoordinateResponseSchema,
         'escalated',
@@ -873,9 +942,9 @@ export const extractFoundationPlanCoordinateData = async (
     if (!validated.some((row) => row.planColumnType)) {
       diagnostics = markEscalated(diagnostics, 'no-visible-plan-codes');
       const directStart = Date.now();
-      const directRaw = await generateAgainstActivePdf(
+      const directRaw = await generateAgainstPriorityPdf(
         ai,
-        active,
+        source,
         FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT,
         foundationPlanDirectMappingResponseSchema,
         'escalated',

@@ -154,20 +154,7 @@ export interface FrameFileResult {
 
 // ---- Report Template ----
 
-export interface RowMapping {
-  rowIndex: number;      // 1-indexed row in the Excel sheet
-  label: string;         // text found in the label column for this row
-  sourceField: SourceField | null;
-}
-
-export interface TemplateMappingConfig {
-  sheetIndex: number;
-  headerRow: number;     // 1-indexed row that contains foundation IDs
-  labelColumn: string;   // column letter (e.g. "B") containing parameter names
-  rowMappings: RowMapping[];
-  multiValueStrategy: MultiValueStrategy;
-}
-
+/** Reinforcement fields the Build-mode report template can place in a row. */
 export type SourceField =
   | 'columnType'
   | 'dimensionWidth'
@@ -180,6 +167,40 @@ export type SourceField =
   | 'hColumn';
 
 export type MultiValueStrategy = 'first' | 'most-common' | 'largest' | 'all';
+
+// ---- Type-table sheets (FoundationType / FoundationInstance / FramingType) ----
+
+/**
+ * One column of a type sheet.
+ *
+ * `key` identifies the column so a re-export updates it instead of appending a
+ * duplicate. `values` is field name → cell value; a string[] means several
+ * source rows disagreed and the configured MultiValueStrategy picks the winner.
+ */
+export interface TypeSheetEntity {
+  key: string;
+  values: Record<string, string | string[]>;
+}
+
+export interface TypeSheetRowMapping {
+  rowIndex: number;      // 1-indexed row in the Excel sheet
+  label: string;         // text found in the label column for this row
+  sourceField: string | null;
+}
+
+export interface TypeSheetConfig {
+  sheetIndex: number;
+  identityRow: number;      // 1-indexed row whose values identify each column
+  labelColumn: string;      // column letter (e.g. "C") containing parameter names
+  firstDataColumn: string;  // column letter (e.g. "D") of the first per-entity column
+  rowMappings: TypeSheetRowMapping[];
+  /**
+   * Optional caption row written without a label guard, for rows that carry no
+   * parameter name of their own (FoundationType's title row shows which column
+   * types feed each foundation).
+   */
+  summary?: { rowIndex: number; sourceField: string };
+}
 
 export type GroupColor = 'blue' | 'green' | 'yellow' | 'orange' | 'purple' | 'pink' | 'teal' | 'indigo';
 

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { FoundationPriorityEvidenceLocation, FoundationPriorityWorkingRow } from '../types';
+import { copyTextToClipboard } from '../utils/clipboard';
 
 interface FoundationPriorityTextResultProps {
   text: string;
@@ -23,19 +24,15 @@ export const FoundationPriorityTextResult: React.FC<FoundationPriorityTextResult
   onDeleteRow,
   onEvidenceSelect,
 }) => {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // Track raw typed text per row so trailing commas/spaces remain visible during editing.
   const [codeDrafts, setCodeDrafts] = useState<Record<string, string>>({});
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch (error) {
-      console.error('Copy failed:', error);
-    }
+    const ok = await copyTextToClipboard(text);
+    setCopyState(ok ? 'copied' : 'failed');
+    window.setTimeout(() => setCopyState('idle'), ok ? 1500 : 4000);
   };
 
   const toggleExpand = (rowId: string) => {
@@ -63,12 +60,24 @@ export const FoundationPriorityTextResult: React.FC<FoundationPriorityTextResult
           <button
             type="button"
             onClick={handleCopy}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+            disabled={rows.length === 0}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-md disabled:opacity-50 disabled:cursor-not-allowed ${
+              copyState === 'failed'
+                ? 'text-red-700 bg-red-50 border-red-300 hover:bg-red-100'
+                : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50'
+            }`}
           >
-            {copied ? 'Copied' : 'Copy Text'}
+            {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy Text'}
           </button>
         </div>
       </div>
+
+      {copyState === 'failed' && (
+        <div role="alert" className="px-6 py-2 bg-red-50 border-b border-red-100 text-xs text-red-700">
+          Could not reach the clipboard. This usually means the page is served over plain http on a
+          network address — open it on localhost or over https, or select the text below and copy manually.
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <div className="px-6 py-8 text-sm text-gray-600">

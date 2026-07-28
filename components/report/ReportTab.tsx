@@ -1,36 +1,36 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import type {
   ExpandedReinforcementData,
+  FoundationPriorityWorkingRow,
+  FrameData,
   GroupColor,
+  MultiValueStrategy,
   ReportTemplate,
-  RowMapping,
-  SourceField,
-  TemplateMappingConfig,
+  TypeSheetConfig,
+  TypeSheetEntity,
 } from '../../types';
-import { autoDetectConfig, fillTemplate, parseSheetPreview } from '../../utils/templateFiller';
+import {
+  autoDetectTypeSheetConfig,
+  fillTypeSheet,
+  findSpecSheetIndex,
+  resolveMultiValue,
+  type TypeSheetSpec,
+} from '../../utils/typeSheetFiller';
+import {
+  FOUNDATION_INSTANCE_SHEET,
+  FOUNDATION_TYPE_SHEET,
+  FRAMING_TYPE_SHEET,
+  buildFoundationInstanceEntities,
+  buildFoundationTypeEntities,
+  buildFramingTypeEntities,
+} from '../../utils/templateSheets';
 import { generateReport, type ReportData, type ReportRow } from '../../utils/reportGenerator';
-import { loadMappingConfig, loadTemplate, saveMappingConfig, saveTemplate } from '../../utils/templateStorage';
+import { loadTemplate, saveTemplate } from '../../utils/templateStorage';
 import { buildDefaultTemplate } from './defaultTemplate';
 import { TemplateEditor } from './TemplateEditor';
 
 type ReportMode = 'upload' | 'build';
-
-const SOURCE_FIELD_LABELS: Record<SourceField, string> = {
-  columnType: 'Column Type (柱符号)',
-  dimensionWidth: '柱型_Lx',
-  dimensionHeight: '柱型_Ly',
-  mainReinforcementCount: '柱型_主筋_本数',
-  mainReinforcementSize: '柱型_主筋_直径',
-  hoopReinforcementSize: '柱型_Hoop_直径',
-  hoopReinforcementSpacing: '柱型_Hoop_距離_最大',
-  bColumn: '柱_Lx',
-  hColumn: '柱_Ly',
-};
-
-const SOURCE_FIELD_OPTIONS = (Object.entries(SOURCE_FIELD_LABELS) as [SourceField, string][]).map(
-  ([value, label]) => ({ value, label }),
-);
 
 const GROUP_COLOR_CLASSES: Record<GroupColor, { header: string; dot: string }> = {
   blue: { header: 'bg-blue-50 text-blue-800', dot: 'bg-blue-400' },
@@ -43,21 +43,33 @@ const GROUP_COLOR_CLASSES: Record<GroupColor, { header: string; dot: string }> =
   indigo: { header: 'bg-indigo-50 text-indigo-800', dot: 'bg-indigo-400' },
 };
 
-interface Props {
-  data: ExpandedReinforcementData[];
+/** One template sheet the upload flow can fill, plus its detected layout. */
+interface SheetPlan {
+  spec: TypeSheetSpec;
+  sheetName: string;
+  config: TypeSheetConfig;
+  entities: TypeSheetEntity[];
+  enabled: boolean;
 }
 
-export const ReportTab: React.FC<Props> = ({ data }) => {
+interface Props {
+  data: ExpandedReinforcementData[];
+  frameData?: FrameData[];
+  priorityData?: FoundationPriorityWorkingRow[];
+}
+
+export const ReportTab: React.FC<Props> = ({ data, frameData = [], priorityData = [] }) => {
   const [mode, setMode] = useState<ReportMode>('upload');
 
   // Upload mode state
   const [wb, setWb] = useState<XLSX.WorkBook | null>(null);
   const [fileBytes, setFileBytes] = useState<Uint8Array | null>(null);
   const [fileName, setFileName] = useState('');
-  const [config, setConfig] = useState<TemplateMappingConfig | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [strategy, setStrategy] = useState<MultiValueStrategy>('first');
+  const [disabledSheets, setDisabledSheets] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Build mode state
@@ -65,10 +77,47 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
   const [showEditor, setShowEditor] = useState(false);
   const [buildExporting, setBuildExporting] = useState(false);
 
-  const foundations = useMemo(
-    () => [...new Set(data.filter((r) => r.foundation).map((r) => r.foundation!))],
-    [data],
+  // Each tab's results become the entities for one template sheet.
+  const entitiesBySpec = useMemo(
+    () =>
+      new Map<TypeSheetSpec, TypeSheetEntity[]>([
+        [FOUNDATION_TYPE_SHEET, buildFoundationTypeEntities(data)],
+        [FOUNDATION_INSTANCE_SHEET, buildFoundationInstanceEntities(priorityData)],
+        [FRAMING_TYPE_SHEET, buildFramingTypeEntities(frameData)],
+      ]),
+    [data, priorityData, frameData],
   );
+
+  /**
+   * Detect the layout of every sheet the workbook actually contains.
+   * A sheet with no entities still appears, so the user can see it was found
+   * but has no data to contribute yet.
+   */
+  const sheetPlans = useMemo<SheetPlan[]>(() => {
+    if (!wb) return [];
+    const plans: SheetPlan[] = [];
+    for (const [spec, entities] of entitiesBySpec) {
+      const sheetIndex = findSpecSheetIndex(wb, spec);
+      if (sheetIndex < 0) continue;
+      const config = autoDetectTypeSheetConfig(wb, sheetIndex, spec);
+      if (!config) continue;
+      plans.push({
+        spec,
+        sheetName: wb.SheetNames[sheetIndex],
+        config,
+        entities,
+        enabled: !disabledSheets[spec.title],
+      });
+    }
+    return plans;
+  }, [wb, entitiesBySpec, disabledSheets]);
+
+  const fillablePlans = useMemo(
+    () => sheetPlans.filter((p) => p.enabled && p.entities.length > 0),
+    [sheetPlans],
+  );
+
+  const totalDataRows = data.length + frameData.length + priorityData.length;
 
   // ---- Upload mode handlers ----
 
@@ -80,18 +129,12 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
     reader.onload = (e) => {
       try {
         const bytes = new Uint8Array(e.target!.result as ArrayBuffer);
-        const workbook = XLSX.read(bytes, { type: 'array', cellStyles: true, bookVBA: true });
-        setWb(workbook);
+        setWb(XLSX.read(bytes, { type: 'array', cellStyles: true, bookVBA: true }));
         setFileBytes(bytes);
         setFileName(file.name);
-        // Restore saved config for THIS specific file, or auto-detect from scratch.
-        // Never reuse mappings from a different file — stale row indices corrupt the template.
-        const savedForFile = loadMappingConfig(file.name);
-        const nextConfig = savedForFile ?? autoDetectConfig(workbook, 0, foundations);
-        setConfig(nextConfig);
-        saveMappingConfig(nextConfig, file.name);
+        setExportError(null);
       } catch {
-        // ignore parse errors
+        setExportError('Could not read that workbook. Only .xlsx/.xlsm templates are supported.');
       }
     };
     reader.readAsArrayBuffer(file);
@@ -110,24 +153,19 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
     e.target.value = '';
   };
 
-  const handleConfigChange = useCallback((next: TemplateMappingConfig) => {
-    setConfig(next);
-    saveMappingConfig(next, fileName);
-  }, [fileName]);
-
-  const handleRedetect = () => {
-    if (!wb) return;
-    const detected = autoDetectConfig(wb, config?.sheetIndex ?? 0, foundations);
-    handleConfigChange(detected);
-  };
-
+  /**
+   * Patch every sheet that has data into a single workbook, one after another,
+   * so the download is one file carrying all of the extracted results.
+   */
   const handleExportFilled = () => {
-    if (!fileBytes || !config) return;
+    if (!fileBytes || fillablePlans.length === 0) return;
     setExporting(true);
     setExportError(null);
     try {
-      // Fill via ZIP + XML patching — styles.xml and all other files are passed through unchanged
-      const resultBytes = fillTemplate(fileBytes, data, config);
+      let resultBytes = fileBytes;
+      for (const plan of fillablePlans) {
+        resultBytes = fillTypeSheet(resultBytes, plan.entities, plan.config, strategy);
+      }
       const ext = fileName.split('.').pop() ?? 'xlsx';
       const baseName = fileName.replace(/\.[^.]+$/, '');
       const blob = new Blob([resultBytes.buffer as ArrayBuffer], { type: 'application/octet-stream' });
@@ -169,32 +207,8 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
     }
   };
 
-  // ---- Derived: upload mode preview ----
-  const uploadPreviewData = useMemo<ReportData | null>(() => {
-    if (!config || data.length === 0 || !data.some((r) => r.foundation)) return null;
-    const mapped = config.rowMappings.filter((r) => r.sourceField);
-    if (mapped.length === 0) return null;
-    const previewTemplate: ReportTemplate = {
-      name: 'preview',
-      multiValueStrategy: config.multiValueStrategy,
-      groups: [
-        {
-          id: 'mapped',
-          name: 'Mapped Parameters',
-          color: 'blue',
-          params: mapped.map((r) => ({
-            id: String(r.rowIndex),
-            label: r.label,
-            sourceField: r.sourceField!,
-          })),
-        },
-      ],
-    };
-    return generateReport(data, previewTemplate);
-  }, [config, data]);
-
   // ---- Empty state ----
-  if (data.length === 0) {
+  if (totalDataRows === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
         <div className="w-16 h-16 rounded-2xl bg-violet-50 flex items-center justify-center mb-4">
@@ -215,8 +229,8 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
         </div>
         <h3 className="text-lg font-semibold text-gray-800 mb-2">No Data Available</h3>
         <p className="text-sm text-gray-500 max-w-sm">
-          Extract column reinforcement data and add foundation-column mappings in the{' '}
-          <strong>Column Reinforcement</strong> tab first.
+          Extract results in the <strong>Column Reinforcement</strong>,{' '}
+          <strong>Frame (FW/FG)</strong> or <strong>Foundation Priority</strong> tab first.
         </p>
       </div>
     );
@@ -271,7 +285,8 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
                     Drop your Excel report template here
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
-                    The system will auto-detect foundation columns and fill in the extracted data
+                    Foundation Type, Foundation Instance and Framing Type are detected and filled
+                    into one file
                   </p>
                 </div>
                 <button
@@ -285,13 +300,13 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
               <input
                 ref={fileInputRef}
                 type="file"
+                aria-label="Upload template file"
                 accept=".xlsx,.xlsm,.xlsb,.xls,.ods"
                 onChange={handleFileInput}
                 className="hidden"
               />
             </div>
           ) : (
-            /* File loaded — show config panel */
             <div className="space-y-5">
               {/* File info bar */}
               <div className="flex items-center justify-between bg-white rounded-xl border border-gray-200 shadow-sm px-5 py-3">
@@ -314,13 +329,28 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
                     <p className="text-sm font-semibold text-gray-800">{fileName}</p>
                     <p className="text-xs text-gray-500">
                       {wb.SheetNames.length} sheet{wb.SheetNames.length !== 1 ? 's' : ''} •{' '}
-                      {config?.rowMappings.filter((r) => r.sourceField).length ?? 0} parameters mapped
+                      {fillablePlans.length} of {sheetPlans.length} detected sheet
+                      {sheetPlans.length !== 1 ? 's' : ''} will be filled
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                    Conflicts
+                    <select
+                      value={strategy}
+                      onChange={(e) => setStrategy(e.target.value as MultiValueStrategy)}
+                      aria-label="Multi-value strategy"
+                      className="text-xs border border-gray-200 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-violet-400"
+                    >
+                      <option value="first">First</option>
+                      <option value="most-common">Most common</option>
+                      <option value="largest">Largest</option>
+                      <option value="all">Show all</option>
+                    </select>
+                  </label>
                   <button
-                    onClick={() => { setWb(null); setFileBytes(null); setFileName(''); setConfig(null); }}
+                    onClick={() => { setWb(null); setFileBytes(null); setFileName(''); }}
                     className="text-xs text-gray-500 hover:text-red-600 transition-colors"
                   >
                     Remove
@@ -334,6 +364,7 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
                   <input
                     ref={fileInputRef}
                     type="file"
+                    aria-label="Replace template file"
                     accept=".xlsx,.xlsm,.xlsb,.xls,.ods"
                     onChange={handleFileInput}
                     className="hidden"
@@ -341,26 +372,21 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
                 </div>
               </div>
 
-              {config && (
-                <MappingConfigPanel
-                  config={config}
-                  workbook={wb}
-                  foundations={foundations}
-                  onChange={handleConfigChange}
-                  onRedetect={handleRedetect}
-                />
-              )}
-
-              {/* Preview */}
-              {uploadPreviewData && uploadPreviewData.foundations.length > 0 ? (
-                <div className="space-y-3">
+              {sheetPlans.length === 0 ? (
+                <div className="bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 text-sm text-amber-700">
+                  No Foundation Type / Foundation Instance / Framing Type sheet was recognised in
+                  this workbook. Check that it is the Tnf design template.
+                </div>
+              ) : (
+                <>
+                  {/* Export */}
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-gray-700">
                       Preview — values to be filled
                     </h3>
                     <button
                       onClick={handleExportFilled}
-                      disabled={exporting}
+                      disabled={exporting || fillablePlans.length === 0}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-violet-600 text-white rounded-md hover:bg-violet-700 transition-all disabled:opacity-50"
                     >
                       {exporting ? (
@@ -382,25 +408,29 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
                       )}
                     </button>
                   </div>
+
                   {exportError && (
                     <p role="alert" className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
                       {exportError}
                     </p>
                   )}
-                  <ReportGrid data={uploadPreviewData} />
-                </div>
-              ) : (
-                <div className="bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 text-sm text-amber-700">
-                  {data.some((r) => r.foundation)
-                    ? 'No rows mapped yet — assign source fields in the mapping table below to see a preview.'
-                    : 'Add foundation-column mappings in the Column Reinforcement tab to enable filling.'}
-                </div>
+
+                  {sheetPlans.map((plan) => (
+                    <SheetPlanCard
+                      key={plan.spec.title}
+                      plan={plan}
+                      strategy={strategy}
+                      onToggleEnabled={(enabled) =>
+                        setDisabledSheets((prev) => ({ ...prev, [plan.spec.title]: !enabled }))
+                      }
+                    />
+                  ))}
+                </>
               )}
             </div>
           )}
         </div>
       )}
-
       {/* ---- BUILD MODE ---- */}
       {mode === 'build' && (
         <div className="space-y-5">
@@ -468,213 +498,115 @@ export const ReportTab: React.FC<Props> = ({ data }) => {
   );
 };
 
-// ---- Mapping Config Panel ----
+// ---- One card per detected template sheet ----
 
-interface MappingConfigPanelProps {
-  config: TemplateMappingConfig;
-  workbook: XLSX.WorkBook;
-  foundations: string[];
-  onChange: (config: TemplateMappingConfig) => void;
-  onRedetect: () => void;
+interface SheetPlanCardProps {
+  plan: SheetPlan;
+  strategy: MultiValueStrategy;
+  onToggleEnabled: (enabled: boolean) => void;
 }
 
-const MappingConfigPanel: React.FC<MappingConfigPanelProps> = ({
-  config,
-  workbook,
-  foundations,
-  onChange,
-  onRedetect,
-}) => {
-  const sheetPreview = useMemo(
-    () => parseSheetPreview(workbook, config.sheetIndex),
-    [workbook, config.sheetIndex],
-  );
-
-  // Which foundations are matched in the template's header row
-  const matchedFoundations = useMemo(() => {
-    const headerRowData = sheetPreview[config.headerRow - 1] ?? [];
-    return foundations.filter((f) => headerRowData.some((cell) => cell?.trim() === f));
-  }, [sheetPreview, config.headerRow, foundations]);
-
-  const unmatchedFoundations = foundations.filter((f) => !matchedFoundations.includes(f));
-
-  const update = (patch: Partial<TemplateMappingConfig>) => onChange({ ...config, ...patch });
-
-  const updateRowMapping = (rowIndex: number, sourceField: SourceField | null) => {
-    update({
-      rowMappings: config.rowMappings.map((r) =>
-        r.rowIndex === rowIndex ? { ...r, sourceField } : r,
-      ),
-    });
-  };
-
-  const addRowMapping = () => {
-    const newMapping: RowMapping = { rowIndex: 0, label: '', sourceField: null };
-    update({ rowMappings: [...config.rowMappings, newMapping] });
-  };
-
-  const removeRowMapping = (rowIndex: number) => {
-    update({ rowMappings: config.rowMappings.filter((r) => r.rowIndex !== rowIndex) });
-  };
+const SheetPlanCard: React.FC<SheetPlanCardProps> = ({ plan, strategy, onToggleEnabled }) => {
+  const { spec, sheetName, config, entities, enabled } = plan;
+  const mapped = config.rowMappings.filter((r) => r.sourceField);
+  const unmapped = config.rowMappings.filter((r) => !r.sourceField);
+  const hasData = entities.length > 0;
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm divide-y divide-gray-100">
-      {/* Layout settings */}
-      <div className="px-5 py-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-800">Mapping Configuration</h3>
-          <button
-            onClick={onRedetect}
-            className="text-xs text-violet-600 hover:text-violet-800 font-medium transition-colors flex items-center gap-1"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-              <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 0 1-9.201 2.466l-.312-.311h2.433a.75.75 0 0 0 0-1.5H3.989a.75.75 0 0 0-.75.75v4.242a.75.75 0 0 0 1.5 0v-2.43l.31.31a7 7 0 0 0 11.712-3.138.75.75 0 0 0-1.449-.39Zm1.23-3.723a.75.75 0 0 0 .219-.53V2.929a.75.75 0 0 0-1.5 0V5.36l-.31-.31A7 7 0 0 0 3.239 8.188a.75.75 0 1 0 1.448.389A5.5 5.5 0 0 1 13.89 6.11l.311.31h-2.432a.75.75 0 0 0 0 1.5h4.243a.75.75 0 0 0 .53-.219Z" clipRule="evenodd" />
-            </svg>
-            Re-detect
-          </button>
-        </div>
-
-        <div className="grid grid-cols-3 gap-4">
-          {workbook.SheetNames.length > 1 && (
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Sheet</label>
-              <select
-                value={config.sheetIndex}
-                onChange={(e) => update({ sheetIndex: Number(e.target.value) })}
-                className="w-full text-sm border border-gray-200 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400"
-              >
-                {workbook.SheetNames.map((name, i) => (
-                  <option key={i} value={i}>{name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Foundation header row
-            </label>
-            <input
-              type="number"
-              min={1}
-              value={config.headerRow}
-              onChange={(e) => update({ headerRow: Math.max(1, Number(e.target.value)) })}
-              className="w-full text-sm border border-gray-200 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Parameter label column
-            </label>
-            <input
-              type="text"
-              maxLength={3}
-              value={config.labelColumn}
-              onChange={(e) => update({ labelColumn: e.target.value.toUpperCase() })}
-              placeholder="e.g. B"
-              className="w-full text-sm border border-gray-200 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Multi-value strategy
-            </label>
-            <select
-              value={config.multiValueStrategy}
-              onChange={(e) =>
-                update({ multiValueStrategy: e.target.value as TemplateMappingConfig['multiValueStrategy'] })
-              }
-              className="w-full text-sm border border-gray-200 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400"
-            >
-              <option value="first">First occurrence</option>
-              <option value="most-common">Most common</option>
-              <option value="largest">Largest (numeric)</option>
-              <option value="all">Show all (concatenate)</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Foundation match status */}
-        <div className="flex flex-wrap gap-2">
-          {matchedFoundations.map((f) => (
-            <span key={f} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 text-xs font-medium border border-green-100">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-              {f}
-            </span>
-          ))}
-          {unmatchedFoundations.map((f) => (
-            <span key={f} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 text-xs border border-gray-200">
-              <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
-              {f} (not in template)
-            </span>
-          ))}
-        </div>
-        {matchedFoundations.length === 0 && (
-          <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded px-3 py-2">
-            No foundation IDs found in row {config.headerRow}. Adjust the header row number or check that the template column headers match your foundation names (e.g. F1, F2A).
-          </p>
-        )}
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-3 flex-wrap">
+        <label className="flex items-center gap-2 text-sm font-semibold text-gray-800 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={enabled}
+            disabled={!hasData}
+            onChange={(e) => onToggleEnabled(e.target.checked)}
+            aria-label={`Fill ${spec.title}`}
+            className="rounded border-gray-300 text-violet-600 focus:ring-violet-400 disabled:opacity-40"
+          />
+          {spec.title}
+          <span className="font-mono text-xs font-normal text-gray-500">({sheetName})</span>
+        </label>
+        <span
+          className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+            hasData ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-gray-100 text-gray-500'
+          }`}
+        >
+          {hasData ? `${entities.length} column${entities.length !== 1 ? 's' : ''}` : 'no data yet'}
+        </span>
       </div>
 
-      {/* Row mappings table */}
-      <div className="px-5 py-4">
-        <div className="flex items-center justify-between mb-3">
-          <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
-            Row Mappings
-          </h4>
-          <button
-            onClick={addRowMapping}
-            className="text-xs text-violet-600 hover:text-violet-800 flex items-center gap-1 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-              <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-            </svg>
-            Add row
-          </button>
-        </div>
-        <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
-          {config.rowMappings.length === 0 && (
-            <p className="text-xs text-gray-400 text-center py-4">
-              No rows detected. Adjust the header row / label column settings above.
-            </p>
-          )}
-          {config.rowMappings.map((rm) => (
-            <div key={rm.rowIndex} className="flex items-center gap-2 py-1 group">
-              <span className="w-10 text-center text-xs font-mono text-gray-400 flex-shrink-0">
-                {rm.rowIndex > 0 ? rm.rowIndex : '—'}
-              </span>
-              <span className="flex-1 text-xs text-gray-700 truncate min-w-0">{rm.label || '(blank)'}</span>
-              <select
-                value={rm.sourceField ?? ''}
-                onChange={(e) =>
-                  updateRowMapping(rm.rowIndex, (e.target.value as SourceField) || null)
-                }
-                className={`w-52 text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-violet-400 ${
-                  rm.sourceField ? 'border-green-200 bg-green-50 text-green-800' : 'border-gray-200'
-                }`}
-              >
-                <option value="">— skip —</option>
-                {SOURCE_FIELD_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
+      {!hasData ? (
+        <p className="px-5 py-4 text-sm text-gray-500">
+          Sheet found, but nothing has been extracted for it yet — it will be left untouched.
+        </p>
+      ) : !enabled ? (
+        <p className="px-5 py-4 text-sm text-gray-500">
+          Skipped — this sheet will be left exactly as it is in the template.
+        </p>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="bg-gray-100 text-gray-600 uppercase tracking-wider">
+                  <th className="px-3 py-2.5 font-semibold border-b border-r border-gray-200 whitespace-nowrap">
+                    Parameter
+                  </th>
+                  {entities.map((entity) => (
+                    <th
+                      key={entity.key}
+                      className="px-3 py-2.5 font-semibold border-b border-gray-200 text-center whitespace-nowrap"
+                    >
+                      {entity.key}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {config.rowMappings.map((row) => (
+                  <tr key={row.rowIndex} className="hover:bg-gray-50 transition-colors">
+                    <td
+                      className={`px-3 py-2.5 font-medium border-r border-gray-100 whitespace-nowrap ${
+                        row.sourceField ? 'text-gray-700' : 'text-gray-400 italic'
+                      }`}
+                    >
+                      {row.label}
+                    </td>
+                    {entities.map((entity) => {
+                      const raw = row.sourceField ? entity.values[row.sourceField] : '';
+                      const value = Array.isArray(raw) ? resolveMultiValue(raw, strategy) : (raw ?? '');
+                      const conflict =
+                        Array.isArray(raw) && new Set(raw.filter(Boolean)).size > 1;
+                      return (
+                        <td
+                          key={entity.key}
+                          className={`px-3 py-2.5 font-mono text-center ${
+                            conflict ? 'bg-amber-50 text-amber-700' : 'text-gray-800'
+                          }`}
+                          title={conflict ? `Multiple values: ${[...new Set(raw as string[])].join(', ')}` : undefined}
+                        >
+                          {value || '-'}
+                          {conflict && <span className="ml-1 text-amber-400 text-[10px]">⚠</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
                 ))}
-              </select>
-              <button
-                onClick={() => removeRowMapping(rm.rowIndex)}
-                className="p-0.5 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                  <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-                </svg>
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
+              </tbody>
+            </table>
+          </div>
+          <div className="border-t border-gray-100 bg-gray-50 px-4 py-2 text-[11px] text-gray-500">
+            {mapped.length} of {config.rowMappings.length} parameters mapped · identity row{' '}
+            {config.identityRow} · labels in column {config.labelColumn} · data from column{' '}
+            {config.firstDataColumn}
+            {unmapped.length > 0 && ` · left blank: ${unmapped.map((r) => r.label).join(', ')}`}
+          </div>
+        </>
+      )}
     </div>
   );
 };
-
 // ---- Shared Report Grid ----
 
 const ReportGrid: React.FC<{ data: ReportData }> = ({ data }) => {

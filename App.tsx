@@ -920,7 +920,11 @@ const App: React.FC = () => {
 
           {activeTab === 'report' && (
             <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading report…</div>}>
-              <ReportTab data={columnRows.rows} />
+              <ReportTab
+                data={columnRows.rows}
+                frameData={frameRows.rows}
+                priorityData={priorityRows.rows}
+              />
             </Suspense>
           )}
         </main>
