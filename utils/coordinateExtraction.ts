@@ -3,7 +3,7 @@ import { parseBoundingBox, parsePage } from './boundingBox';
 
 const cleanLabel = (value: unknown) =>
   typeof value === 'string'
-    ? value.replace(/\s*[\(（].*?[\)）]/g, '').replace(/\s+/g, '').trim().toUpperCase()
+    ? value.replace(/\s*[\(（].*?[\)）]/g, '').replace(/['’]/g, '').replace(/\s+/g, '').trim().toUpperCase()
     : '';
 
 const cleanAxisText = (value: unknown) =>

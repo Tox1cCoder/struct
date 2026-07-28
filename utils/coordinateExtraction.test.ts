@@ -12,6 +12,16 @@ describe('normalizeCertifiedCoordinateRows', () => {
     ]);
   });
 
+  it('canonicalizes a certified apostrophe without dropping its numeric prefix', () => {
+    expect(
+      normalizeCertifiedCoordinateRows([
+        { xAxis: 'X1', yAxis: 'Y1', columnType: "1'C1" },
+      ]),
+    ).toEqual([
+      { xAxis: 'X1', yAxis: 'Y1', columnType: '1C1' },
+    ]);
+  });
+
   it('salvages alternative keys and combined coordinate strings', () => {
     expect(
       normalizeCertifiedCoordinateRows([
