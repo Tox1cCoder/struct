@@ -117,7 +117,7 @@ The prompt states that anchors are deterministic evidence from the same PDF, whi
 
 ### Completeness validation
 
-For a foundation-plan PDF with native anchors, build an expected set from unique standalone tokens matching `^F[A-Z0-9]+$`. Classify `FC...` tokens as column labels before applying the foundation pattern, so they never enter the expected foundation set. After normalization, compute:
+For a foundation-plan PDF with native anchors, build an expected set from tokens whose leading text matches `^F(?:K?\d+[A-Z]?)(?=$|[（(])`. This accepts standalone labels such as `F1`, `F10`, and `FK1`, plus labels joined to elevation notes such as `F1A(設計GL-1,500)`. Classify `FC...` as plan-column labels first; labels beginning `FG`, `FW`, or `FWS` are frame labels and never enter the expected foundation set. After normalization, compute:
 
 - expected foundation count;
 - returned foundation count;
@@ -256,7 +256,7 @@ Because hosted preview-model latency varies, the design does not promise a fixed
 
 - **Preview-model behavior changes:** keep model IDs and policies centralized and cover request shape with tests.
 - **Native text order is not reading order:** preserve bounding boxes and treat anchors as spatial evidence, not prose.
-- **False expected labels from notes or legends:** classify exact standalone tokens only, exclude `FC...` before foundation classification, and record any fixture-reviewed exclusions explicitly rather than relying on a hidden spatial heuristic.
+- **False expected labels from notes, columns, or frames:** use the defined foundation-prefix pattern, classify `FC...` first, exclude `FG...`/`FW...`/`FWS...`, and record fixture-reviewed exclusions explicitly rather than relying on a hidden spatial heuristic.
 - **Crops omit necessary grid context:** always include the anchor manifest and apply the defined 10%-per-side crop margin and 20% minimum crop size.
 - **Escalation recreates current latency:** escalate only the missing set and retain primary rows.
 - **Scanned PDFs lack anchors:** keep the vision-only fallback and mark its lower-confidence coverage mode explicitly.
