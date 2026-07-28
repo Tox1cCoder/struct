@@ -17,7 +17,7 @@ import {
 } from "../types";
 import { parseBoundingBox, parsePage } from "../utils/boundingBox";
 import { normalizeFrameData } from "../utils/frameData";
-import { FRAME_IMAGE_MODEL } from './geminiRequestPolicy';
+import { FRAME_IMAGE_MODEL, selectColumnRequestPolicy } from './geminiRequestPolicy';
 import {
   normalizeCertifiedCoordinateRows,
   normalizeFoundationPlanCoordinateRows,
@@ -341,6 +341,7 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
   }
 
   const ai = new GoogleGenAI({ apiKey });
+  const requestPolicy = selectColumnRequestPolicy(mimeType);
   const finalPrompt = `
     ${REINFORCEMENT_SYSTEM_PROMPT}
 
@@ -356,14 +357,17 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: requestPolicy.model,
       contents: {
         parts: [
           {
             inlineData: {
               mimeType: mimeType,
               data: base64Data
-            }
+            },
+            ...(requestPolicy.mediaResolution
+              ? { mediaResolution: { level: requestPolicy.mediaResolution } }
+              : {}),
           },
           {
             text: finalPrompt
@@ -372,6 +376,9 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
       },
       config: {
         responseMimeType: 'application/json',
+        ...(requestPolicy.thinkingLevel
+          ? { thinkingConfig: { thinkingLevel: requestPolicy.thinkingLevel } }
+          : {}),
         responseSchema: {
           type: Type.ARRAY,
           items: {
