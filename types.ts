@@ -270,10 +270,46 @@ export interface FoundationPriorityWorkingRow extends EditableRowMeta {
   resolutions: FoundationPriorityResolution[];
 }
 
+export interface PriorityUsageSummary {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  thoughtsTokenCount?: number;
+  totalTokenCount?: number;
+}
+
+export interface PriorityCoverageDiagnostics {
+  mode: 'anchored' | 'structural';
+  expectedCount: number;
+  returnedCount: number;
+  coordinateCount: number;
+  codeCount: number;
+  missingLabels: string[];
+  unresolvedLabels: string[];
+}
+
+export interface PriorityAnchorCounts {
+  foundation: number;
+  'plan-column': number;
+  'certified-column': number;
+  'x-axis': number;
+  'y-axis': number;
+}
+
 export interface PriorityPipelineDiagnostics {
   fileName: string;
   role: 'certified' | 'plan';
+  model: string;
+  anchorMode: 'native' | 'unavailable';
+  anchorCounts: PriorityAnchorCounts;
+  coverage?: PriorityCoverageDiagnostics;
+  cropCount: number;
+  warning?: string;
+  usage?: {
+    primary?: PriorityUsageSummary;
+    escalated?: PriorityUsageSummary;
+  };
   stages: {
+    preprocessMs?: number;
     uploadMs?: number;
     primaryGenerationMs?: number;
     primaryValidationMs?: number;

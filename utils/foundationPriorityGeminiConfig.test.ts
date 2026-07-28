@@ -45,6 +45,18 @@ describe('Foundation Priority Gemini request config', () => {
     ]);
   });
 
+  it('keeps additional crop parts between the manifest prompt and targeted instructions', () => {
+    const pdfPart = { fileData: { fileUri: 'files/example', mimeType: 'application/pdf' } };
+    const cropPart = { inlineData: { data: 'crop', mimeType: 'image/png' } };
+
+    expect(createFoundationPriorityContents(pdfPart, 'manifest and task', [cropPart, 'target F2'])).toEqual([
+      pdfPart,
+      'manifest and task',
+      cropPart,
+      'target F2',
+    ]);
+  });
+
   it('escalates when normalized output is empty regardless of role', () => {
     expect(needsPriorityEscalation('certified', 0, 0)).toBe(true);
     expect(needsPriorityEscalation('plan', 0, 0)).toBe(true);

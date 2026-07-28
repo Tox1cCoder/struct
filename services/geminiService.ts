@@ -2,8 +2,9 @@ import {
   createPartFromUri,
   FileState,
   GoogleGenAI,
+  PartMediaResolutionLevel,
   Type,
-  type PartMediaResolutionLevel,
+  type PartUnion,
 } from "@google/genai";
 import {
   CertifiedCoordinateData,
@@ -12,6 +13,7 @@ import {
   FoundationPlanCoordinateData,
   FrameData,
   PriorityPipelineDiagnostics,
+  PriorityUsageSummary,
 } from "../types";
 import { parseBoundingBox, parsePage } from "../utils/boundingBox";
 import { normalizeFrameData } from "../utils/frameData";
@@ -22,6 +24,16 @@ import {
   summarizeRawCoordinateRows,
 } from "../utils/coordinateExtraction";
 import { logError } from "../utils/errorHandling";
+import {
+  evaluateFoundationPlanCoverage,
+  mergePriorityPlanRows,
+} from '../utils/foundationPriorityCoverage';
+import { renderPdfAnchorCrop } from '../utils/pdfAnchorCrop';
+import {
+  extractPriorityPdfAnchors,
+  PdfAnchorInventory,
+  serializePriorityAnchorManifest,
+} from '../utils/pdfTextAnchors';
 import {
   FOUNDATION_PRIORITY_API_VERSION,
   FOUNDATION_PRIORITY_POLL_INTERVAL_MS,
@@ -162,8 +174,8 @@ type ActiveGeminiPdfFile = {
  * reference to a file already uploaded through the Files API.
  */
 type PriorityPdfSource =
-  | { kind: 'inline'; base64: string; mimeType: string }
-  | { kind: 'uploaded'; active: ActiveGeminiPdfFile };
+  | { kind: 'inline'; base64: string; mimeType: string; file: File; anchors: PdfAnchorInventory }
+  | { kind: 'uploaded'; active: ActiveGeminiPdfFile; file: File; anchors: PdfAnchorInventory };
 
 export const CERTIFIED_FOUNDATION_COORDINATE_PROMPT = `
 You are reading one layer of a structural foundation drawing set: 認定柱脚資料.
@@ -738,23 +750,37 @@ const readFileAsBase64 = (file: File): Promise<string> =>
 const withPriorityPdf = async <T>(
   ai: GoogleGenAI,
   file: File,
-  work: (source: PriorityPdfSource, prepareMs: number) => Promise<T>,
+  work: (source: PriorityPdfSource, prepareMs: number, preprocessMs: number) => Promise<T>,
 ): Promise<T> => {
   const prepareStart = Date.now();
+  const anchorPromise = (async () => {
+    const started = Date.now();
+    const anchors = await extractPriorityPdfAnchors(file);
+    return { anchors, preprocessMs: Date.now() - started };
+  })();
 
   if (file.size <= MAX_INLINE_PDF_BYTES) {
-    const base64 = await readFileAsBase64(file);
+    const [base64, anchorResult] = await Promise.all([
+      readFileAsBase64(file),
+      anchorPromise,
+    ]);
     const source: PriorityPdfSource = {
       kind: 'inline',
       base64,
       mimeType: file.type || 'application/pdf',
+      file,
+      anchors: anchorResult.anchors,
     };
-    return work(source, Date.now() - prepareStart);
+    return work(source, Date.now() - prepareStart, anchorResult.preprocessMs);
   }
 
   let active: ActiveGeminiPdfFile;
+  let anchorResult: Awaited<typeof anchorPromise>;
   try {
-    active = await uploadPdfAndWaitUntilActive(ai, file);
+    [active, anchorResult] = await Promise.all([
+      uploadPdfAndWaitUntilActive(ai, file),
+      anchorPromise,
+    ]);
   } catch (error) {
     throw new Error(
       `${file.name} is ${(file.size / 1024 / 1024).toFixed(1)} MB, which is too large to send inline, ` +
@@ -765,7 +791,11 @@ const withPriorityPdf = async <T>(
   const prepareMs = Date.now() - prepareStart;
 
   try {
-    return await work({ kind: 'uploaded', active }, prepareMs);
+    return await work(
+      { kind: 'uploaded', active, file, anchors: anchorResult.anchors },
+      prepareMs,
+      anchorResult.preprocessMs,
+    );
   } finally {
     try {
       await ai.files.delete({ name: active.name });
@@ -784,25 +814,39 @@ const createPriorityPdfPart = (source: PriorityPdfSource, mediaResolution: PartM
         mediaResolution: { level: mediaResolution },
       };
 
+const copyPriorityUsage = (usageMetadata: unknown): PriorityUsageSummary | undefined => {
+  if (!usageMetadata || typeof usageMetadata !== 'object') return undefined;
+  const source = usageMetadata as Record<string, unknown>;
+  const usage: PriorityUsageSummary = {};
+  for (const key of ['promptTokenCount', 'candidatesTokenCount', 'thoughtsTokenCount', 'totalTokenCount'] as const) {
+    if (typeof source[key] === 'number') usage[key] = source[key];
+  }
+  return Object.keys(usage).length > 0 ? usage : undefined;
+};
+
 const generateAgainstPriorityPdf = async (
   ai: GoogleGenAI,
   source: PriorityPdfSource,
   prompt: string,
   responseJsonSchema: object,
   pass: 'primary' | 'escalated',
+  additionalParts: PartUnion[] = [],
 ) => {
   const passConfig = selectPriorityPass(pass);
   const filePart = createPriorityPdfPart(source, passConfig.mediaResolution);
   const response = await ai.models.generateContent({
     model: passConfig.model,
-    contents: createFoundationPriorityContents(filePart, prompt),
+    contents: createFoundationPriorityContents(filePart, prompt, additionalParts),
     config: createFoundationPriorityGenerationConfig(responseJsonSchema, passConfig.thinkingLevel),
   });
   const jsonText = response.text;
   if (!jsonText) {
     throw new Error('No data returned from the model.');
   }
-  return parseStructuredArrayResponse(JSON.parse(jsonText));
+  return {
+    raw: parseStructuredArrayResponse(JSON.parse(jsonText)),
+    usage: copyPriorityUsage(response.usageMetadata),
+  };
 };
 
 const addStageDuration = (
@@ -817,6 +861,24 @@ const addStageDuration = (
   return finishStage(diagnostics, stage, existing + durationMs);
 };
 
+const recordPriorityUsage = (
+  diagnostics: PriorityPipelineDiagnostics,
+  pass: 'primary' | 'escalated',
+  usage: PriorityUsageSummary | undefined,
+): PriorityPipelineDiagnostics => usage ? {
+  ...diagnostics,
+  usage: { ...diagnostics.usage, [pass]: usage },
+} : diagnostics;
+
+const recordPrioritySource = (
+  diagnostics: PriorityPipelineDiagnostics,
+  source: PriorityPdfSource,
+): PriorityPipelineDiagnostics => ({
+  ...diagnostics,
+  anchorMode: source.anchors.mode,
+  anchorCounts: { ...source.anchors.counts },
+});
+
 interface PriorityExtractionResult<T> {
   data: T[];
   diagnostics: PriorityPipelineDiagnostics;
@@ -829,17 +891,22 @@ export const extractCertifiedCoordinateData = async (
   const totalStart = Date.now();
   let diagnostics = createPriorityDiagnostics(file.name, 'certified');
 
-  const result = await withPriorityPdf(ai, file, async (source, prepareMs) => {
+  const result = await withPriorityPdf(ai, file, async (source, prepareMs, preprocessMs) => {
     diagnostics = finishStage(diagnostics, 'upload', prepareMs);
+    diagnostics = finishStage(diagnostics, 'preprocess', preprocessMs);
+    diagnostics = recordPrioritySource(diagnostics, source);
+    const prompt = `${serializePriorityAnchorManifest(source.anchors)}\n\n${CERTIFIED_FOUNDATION_COORDINATE_PROMPT}`;
 
     const primaryStart = Date.now();
-    const primaryRaw = await generateAgainstPriorityPdf(
+    const primaryResult = await generateAgainstPriorityPdf(
       ai,
       source,
-      CERTIFIED_FOUNDATION_COORDINATE_PROMPT,
+      prompt,
       certifiedCoordinateResponseSchema,
       'primary',
     );
+    const primaryRaw = primaryResult.raw;
+    diagnostics = recordPriorityUsage(diagnostics, 'primary', primaryResult.usage);
     diagnostics = finishStage(diagnostics, 'primaryGeneration', Date.now() - primaryStart);
 
     const primaryValidateStart = Date.now();
@@ -854,13 +921,15 @@ export const extractCertifiedCoordinateData = async (
       );
 
       const fallbackStart = Date.now();
-      const fallbackRaw = await generateAgainstPriorityPdf(
+      const fallbackResult = await generateAgainstPriorityPdf(
         ai,
         source,
-        CERTIFIED_FOUNDATION_COORDINATE_FALLBACK_PROMPT,
+        `${serializePriorityAnchorManifest(source.anchors)}\n\n${CERTIFIED_FOUNDATION_COORDINATE_FALLBACK_PROMPT}`,
         certifiedCoordinateResponseSchema,
         'escalated',
       );
+      const fallbackRaw = fallbackResult.raw;
+      diagnostics = recordPriorityUsage(diagnostics, 'escalated', fallbackResult.usage);
       diagnostics = finishStage(diagnostics, 'fallbackGeneration', Date.now() - fallbackStart);
 
       const fallbackValidateStart = Date.now();
@@ -890,82 +959,133 @@ export const extractFoundationPlanCoordinateData = async (
   const totalStart = Date.now();
   let diagnostics = createPriorityDiagnostics(file.name, 'plan');
 
-  const result = await withPriorityPdf(ai, file, async (source, prepareMs) => {
+  const result = await withPriorityPdf(ai, file, async (source, prepareMs, preprocessMs) => {
     diagnostics = finishStage(diagnostics, 'upload', prepareMs);
+    diagnostics = finishStage(diagnostics, 'preprocess', preprocessMs);
+    diagnostics = recordPrioritySource(diagnostics, source);
+    const manifestedPrompt = `${serializePriorityAnchorManifest(source.anchors)}\n\n${FOUNDATION_PLAN_COORDINATE_PROMPT}`;
 
     const primaryStart = Date.now();
-    const primaryRaw = await generateAgainstPriorityPdf(
+    const primaryResult = await generateAgainstPriorityPdf(
       ai,
       source,
-      FOUNDATION_PLAN_COORDINATE_PROMPT,
+      manifestedPrompt,
       foundationPlanCoordinateResponseSchema,
       'primary',
     );
+    const primaryRaw = primaryResult.raw;
+    diagnostics = recordPriorityUsage(diagnostics, 'primary', primaryResult.usage);
     diagnostics = finishStage(diagnostics, 'primaryGeneration', Date.now() - primaryStart);
 
     const primaryValidateStart = Date.now();
     let validated = normalizeFoundationPlanCoordinateRows(primaryRaw);
+    let coverage = evaluateFoundationPlanCoverage(source.anchors, validated);
     diagnostics = finishStage(diagnostics, 'primaryValidation', Date.now() - primaryValidateStart);
+    diagnostics = { ...diagnostics, coverage };
 
-    const resolvable = validated.filter((row) => row.xAxis && row.yAxis).length;
-    if (needsPriorityEscalation('plan', validated.length, resolvable)) {
-      diagnostics = markEscalated(
-        diagnostics,
-        validated.length === 0 ? 'normalized-rows-empty' : 'no-resolvable-locations',
-      );
-      logError(
-        `Foundation plan extraction returned unusable rows for ${file.name}. Primary raw sample:`,
-        summarizeRawCoordinateRows(primaryRaw),
-      );
+    if (!coverage.complete) {
+      const targetLabels = [...new Set([...coverage.missingLabels, ...coverage.unresolvedLabels])]
+        .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+      diagnostics = markEscalated(diagnostics, coverage.reasons.join(', '));
 
+      const targetSet = new Set(targetLabels);
+      const cropResults = await Promise.allSettled(
+        source.anchors.anchors
+          .filter((anchor) => anchor.kind === 'foundation' && targetSet.has(anchor.label))
+          .map((anchor) => renderPdfAnchorCrop(source.file, anchor)),
+      );
+      const cropParts: PartUnion[] = cropResults.flatMap((cropResult) =>
+        cropResult.status === 'fulfilled'
+          ? [{
+              inlineData: { mimeType: cropResult.value.mimeType, data: cropResult.value.data },
+              mediaResolution: { level: PartMediaResolutionLevel.MEDIA_RESOLUTION_HIGH },
+            }]
+          : [],
+      );
+      diagnostics = { ...diagnostics, cropCount: cropParts.length };
+
+      const targetInstruction = `TARGETED RETRY: Extract only these missing or unresolved foundation labels: ${targetLabels.join(', ')}. Return every readable support location for them. The attached PNG crops, when present, are high-resolution evidence for these labels.`;
       const fallbackStart = Date.now();
-      const fallbackRaw = await generateAgainstPriorityPdf(
-        ai,
-        source,
-        FOUNDATION_PLAN_COORDINATE_FALLBACK_PROMPT,
-        foundationPlanCoordinateResponseSchema,
-        'escalated',
-      );
-      diagnostics = finishStage(diagnostics, 'fallbackGeneration', Date.now() - fallbackStart);
-
-      const fallbackValidateStart = Date.now();
-      validated = normalizeFoundationPlanCoordinateRows(fallbackRaw);
-      diagnostics = finishStage(diagnostics, 'fallbackValidation', Date.now() - fallbackValidateStart);
-
-      if (validated.length === 0) {
-        logError(
-          `Foundation plan extraction still returned unusable rows for ${file.name}. Fallback raw sample:`,
-          summarizeRawCoordinateRows(fallbackRaw),
+      try {
+        const fallbackResult = await generateAgainstPriorityPdf(
+          ai,
+          source,
+          `${serializePriorityAnchorManifest(source.anchors)}\n\n${FOUNDATION_PLAN_COORDINATE_FALLBACK_PROMPT}`,
+          foundationPlanCoordinateResponseSchema,
+          'escalated',
+          [...cropParts, targetInstruction],
         );
+        diagnostics = recordPriorityUsage(diagnostics, 'escalated', fallbackResult.usage);
+        diagnostics = addStageDuration(diagnostics, 'fallbackGeneration', Date.now() - fallbackStart);
+
+        const fallbackValidateStart = Date.now();
+        const targeted = normalizeFoundationPlanCoordinateRows(fallbackResult.raw);
+        validated = normalizeFoundationPlanCoordinateRows(mergePriorityPlanRows(validated, targeted));
+        coverage = evaluateFoundationPlanCoverage(source.anchors, validated);
+        diagnostics = addStageDuration(diagnostics, 'fallbackValidation', Date.now() - fallbackValidateStart);
+        diagnostics = { ...diagnostics, coverage };
+      } catch (error) {
+        diagnostics = addStageDuration(diagnostics, 'fallbackGeneration', Date.now() - fallbackStart);
+        diagnostics = {
+          ...diagnostics,
+          warning: `Foundation coverage is incomplete because the targeted retry failed: ${error instanceof Error ? error.message : String(error)}`,
+        };
       }
     }
 
     if (!validated.some((row) => row.planColumnType)) {
       diagnostics = markEscalated(diagnostics, 'no-visible-plan-codes');
+      const directTargets = [...new Set([
+        ...coverage.missingLabels,
+        ...coverage.unresolvedLabels,
+        ...(coverage.mode === 'anchored' ? source.anchors.foundationLabels : []),
+      ])].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
       const directStart = Date.now();
-      const directRaw = await generateAgainstPriorityPdf(
-        ai,
-        source,
-        FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT,
-        foundationPlanDirectMappingResponseSchema,
-        'escalated',
-      );
-      diagnostics = addStageDuration(diagnostics, 'fallbackGeneration', Date.now() - directStart);
+      try {
+        const directResult = await generateAgainstPriorityPdf(
+          ai,
+          source,
+          `${serializePriorityAnchorManifest(source.anchors)}\n\n${FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT}`,
+          foundationPlanDirectMappingResponseSchema,
+          'escalated',
+          [`DIRECT-MAPPING TARGETS: ${directTargets.join(', ') || 'all visible foundations'}.`],
+        );
+        diagnostics = recordPriorityUsage(diagnostics, 'escalated', directResult.usage);
+        diagnostics = addStageDuration(diagnostics, 'fallbackGeneration', Date.now() - directStart);
 
-      const directValidateStart = Date.now();
-      validated = normalizeFoundationPlanCoordinateRows([...validated, ...directRaw]);
-      diagnostics = addStageDuration(diagnostics, 'fallbackValidation', Date.now() - directValidateStart);
+        const directValidateStart = Date.now();
+        const directRows = normalizeFoundationPlanCoordinateRows(directResult.raw);
+        validated = normalizeFoundationPlanCoordinateRows(mergePriorityPlanRows(validated, directRows));
+        coverage = evaluateFoundationPlanCoverage(source.anchors, validated);
+        diagnostics = addStageDuration(diagnostics, 'fallbackValidation', Date.now() - directValidateStart);
+        diagnostics = { ...diagnostics, coverage };
+      } catch (error) {
+        diagnostics = addStageDuration(diagnostics, 'fallbackGeneration', Date.now() - directStart);
+        diagnostics = {
+          ...diagnostics,
+          warning: diagnostics.warning ?? `Foundation direct mapping could not be completed: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
 
       if (!validated.some((row) => row.planColumnType)) {
         logError(
-          `Foundation plan direct mapping fallback returned no code-bearing rows for ${file.name}. Raw sample:`,
-          summarizeRawCoordinateRows(directRaw),
+          `Foundation plan direct mapping fallback returned no code-bearing rows for ${file.name}.`,
         );
       }
     }
 
     if (validated.length === 0) {
       throw new Error('No valid foundation plan data found in response. Gemini returned rows, but none contained a readable foundation label.');
+    }
+
+    coverage = evaluateFoundationPlanCoverage(source.anchors, validated);
+    diagnostics = { ...diagnostics, coverage };
+    if (!coverage.complete) {
+      const labels = [...coverage.missingLabels, ...coverage.unresolvedLabels];
+      diagnostics = {
+        ...diagnostics,
+        warning: diagnostics.warning ?? `Foundation coverage is incomplete${labels.length ? `; missing or unresolved: ${labels.join(', ')}` : ''}.`,
+      };
     }
 
     return validated;

@@ -49,7 +49,12 @@ export const createFoundationPriorityGenerationConfig = (
   },
 });
 
-export const createFoundationPriorityContents = (filePart: PartUnion, prompt: string): PartUnion[] => [
+export const createFoundationPriorityContents = (
+  filePart: PartUnion,
+  prompt: string,
+  additionalParts: PartUnion[] = [],
+): PartUnion[] => [
   filePart,
   prompt,
+  ...additionalParts,
 ];
