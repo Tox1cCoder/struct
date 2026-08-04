@@ -23,24 +23,24 @@
 
 ## Reviewed Expected Output
 
-Canonical codes remove the display apostrophe from certified labels (`1'C1` → `1C1`) without dropping the numeric prefix.
+Extraction continues to preserve the certified label after removing its display apostrophe (`1'C1` → `1C1`). Generated results then remove the numeric prefix (`1C1` → `C1`) before display and merging.
 
 ```text
-F1: 1C1, 1C2, 1C4
+F1: C1, C2, C4
 F1A: FC1
 F1B: unresolved — confirm two between-grid placements in the evidence viewer
-F2: 1C1, P1, P2
+F2: C1, P1, P2
 F2A: unresolved — confirm the adjacent 1C6/P2 evidence at Y7A
-F3: 1C5
-F3A: 1C1
+F3: C5
+F3A: C1
 F4: P1
-F5: 1C3
-F6: 1C1
-F7: 1C3, 1C1
-F8: 1C3
-F9: 1C4
+F5: C3
+F6: C1
+F7: C3, C1
+F8: C3
+F9: C4
 F9A: FC1
-F10: 1C1
+F10: C1
 ```
 
 `F1A` and `F9A` originate from visible plan `FC1` labels. Other resolved codes use the certified placement map. The two explicitly unresolved labels are retained in the golden fixture so extraction coverage cannot silently omit them.
@@ -67,21 +67,21 @@ The replacement paired-quadrant pipeline renders four corresponding high-resolut
 
 | Foundation | Code | Plan page | Certified page | Notes |
 | ---------- | ---- | --------- | -------------- | ----- |
-| F1 | 1C1, 1C2, 1C4 | 1 | 1 | Multiple placements |
+| F1 | C1, C2, C4 | 1 | 1 | Multiple placements |
 | F1A | FC1 | 1 | — | Plan FC priority |
 | F1B | unresolved | 1 | 1 | Between-grid viewer confirmation required |
-| F2 | 1C1, P1, P2 | 1 | 1 | Multiple placements |
+| F2 | C1, P1, P2 | 1 | 1 | Multiple placements |
 | F2A | unresolved | 1 | 1 | Adjacent 1C6/P2 viewer confirmation required |
-| F3 | 1C5 | 1 | 1 | Certified fallback |
-| F3A | 1C1 | 1 | 1 | Certified fallback |
+| F3 | C5 | 1 | 1 | Certified fallback |
+| F3A | C1 | 1 | 1 | Certified fallback |
 | F4 | P1 | 1 | 1 | Repeated perimeter placements |
-| F5 | 1C3 | 1 | 1 | Certified fallback |
-| F6 | 1C1 | 1 | 1 | Certified fallback |
-| F7 | 1C3, 1C1 | 1 | 1 | Two placements |
-| F8 | 1C3 | 1 | 1 | Certified fallback |
-| F9 | 1C4 | 1 | 1 | Certified fallback |
+| F5 | C3 | 1 | 1 | Certified fallback |
+| F6 | C1 | 1 | 1 | Certified fallback |
+| F7 | C3, C1 | 1 | 1 | Two placements |
+| F8 | C3 | 1 | 1 | Certified fallback |
+| F9 | C4 | 1 | 1 | Certified fallback |
 | F9A | FC1 | 1 | — | Plan FC priority |
-| F10 | 1C1 | 1 | 1 | Certified fallback |
+| F10 | C1 | 1 | 1 | Certified fallback |
 
 ## Candidate Comparison (Task 10 Step 3)
 

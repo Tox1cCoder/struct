@@ -25,7 +25,7 @@ describe('buildFoundationPriorityText', () => {
     expect(result.text).toBe('F1: C3009');
   });
 
-  it('falls back to certified numeric-prefixed C codes such as 1C2', async () => {
+  it('normalizes certified numeric-prefixed C codes such as 1C2', async () => {
     const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
 
     const result = buildFoundationPriorityText(
@@ -33,7 +33,7 @@ describe('buildFoundationPriorityText', () => {
       [{ foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: '' }],
     );
 
-    expect(result.lines).toEqual(['F1: 1C2']);
+    expect(result.lines).toEqual(['F1: C2']);
   });
 
   it('merges numeric-prefixed certified codes from the observed foundation PDF coordinate layout', async () => {
@@ -54,7 +54,34 @@ describe('buildFoundationPriorityText', () => {
       ],
     );
 
-    expect(result.lines).toEqual(['F3: 1C2', 'F4: 1C2', 'F5: 1C3', 'F6: 1C2']);
+    expect(result.lines).toEqual(['F3: C2', 'F4: C2', 'F5: C3', 'F6: C2']);
+  });
+
+  it('removes numeric C prefixes and merges equivalent result codes with all evidence', async () => {
+    const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
+
+    const result = buildFoundationPriorityText(
+      [
+        { xAxis: 'X1', yAxis: 'Y1', columnType: '1C1' },
+        { xAxis: 'X2', yAxis: 'Y2', columnType: 'C1' },
+        { xAxis: 'X3', yAxis: 'Y3', columnType: '12C4' },
+      ],
+      [
+        { foundation: 'F1', xAxis: 'X1', yAxis: 'Y1', planColumnType: '' },
+        { foundation: 'F1', xAxis: 'X2', yAxis: 'Y2', planColumnType: '' },
+        { foundation: 'F1', xAxis: 'X3', yAxis: 'Y3', planColumnType: '' },
+      ],
+    );
+
+    expect(result.lines).toEqual(['F1: C1, C4']);
+    expect(result.rows[0].codes).toEqual(['C1', 'C4']);
+    expect(result.rows[0].resolutions.map((resolution) => ({
+      columnType: resolution.columnType,
+      evidenceCount: resolution.locations.length,
+    }))).toEqual([
+      { columnType: 'C1', evidenceCount: 2 },
+      { columnType: 'C4', evidenceCount: 1 },
+    ]);
   });
 
   it('uses the visible foundation plan C or P alias when no certified coordinate matches', async () => {

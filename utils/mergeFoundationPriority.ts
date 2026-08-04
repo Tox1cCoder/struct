@@ -45,6 +45,8 @@ const isFcCode = (value: string) => value.startsWith('FC');
 
 const isCertifiedCCode = (value: string) => /^(?:\d+)?C[A-Z0-9]+$/.test(value);
 
+const normalizeResultColumnCode = (value: string) => value.replace(/^\d+(?=C)/, '');
+
 const naturalCompare = (left: string, right: string) =>
   left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
 
@@ -167,6 +169,7 @@ export const buildFoundationPriorityText = (
     }
 
     if (!resolvedColumnType || !method) continue;
+    resolvedColumnType = normalizeResultColumnCode(resolvedColumnType);
 
     if (!foundationFirstSeen.has(normalizedRow.foundation)) {
       foundationFirstSeen.set(normalizedRow.foundation, foundationSeq++);
