@@ -37,6 +37,9 @@ export interface ExpandedReinforcementData {
   dimensionWidth: string;
   dimensionHeight: string;
   mainReinforcementCount: string;
+  /** Per-direction bar counts, reconstructed from the total by deriveMainBarSplit. */
+  mainReinforcementCountX?: string;
+  mainReinforcementCountY?: string;
   mainReinforcementSize: string;
   hoopReinforcementSize: string;
   hoopReinforcementSpacing: string;
@@ -160,6 +163,8 @@ export type SourceField =
   | 'dimensionWidth'
   | 'dimensionHeight'
   | 'mainReinforcementCount'
+  | 'mainReinforcementCountX'
+  | 'mainReinforcementCountY'
   | 'mainReinforcementSize'
   | 'hoopReinforcementSize'
   | 'hoopReinforcementSpacing'

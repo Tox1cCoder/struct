@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { BoundingBox, EditableExpandedReinforcementData, ExpandedReinforcementData } from '../types';
+import { withDerivedMainBarSplit } from '../utils/dataTransform';
 
 interface RowSource {
   fileId: string;
@@ -62,6 +63,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
         '柱型_lx',
         '柱型_ly',
         '柱型_主筋_本数',
+        '柱型_主筋_本数_X',
+        '柱型_主筋_本数_Y',
         '柱型_主筋_直径',
         '柱型_Hoop_直径',
         '柱型_Hoop_距離_最大',
@@ -79,6 +82,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
           row.dimensionWidth,
           row.dimensionHeight,
           row.mainReinforcementCount,
+          row.mainReinforcementCountX || '',
+          row.mainReinforcementCountY || '',
           row.mainReinforcementSize,
           row.hoopReinforcementSize,
           row.hoopReinforcementSpacing,
@@ -102,6 +107,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
         { wch: 10 },
         { wch: 10 },
         { wch: 12 },
+        { wch: 14 },
+        { wch: 14 },
         { wch: 10 },
         { wch: 10 },
         { wch: 12 },
@@ -138,7 +145,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
 
   const handlePatch = (row: EditableExpandedReinforcementData, patch: Partial<ExpandedReinforcementData>) => {
     if (!onRowChange) return;
-    onRowChange(row.rowId, patch);
+    // Editing the total or a side length invalidates the derived X/Y counts.
+    onRowChange(row.rowId, withDerivedMainBarSplit(row, patch));
   };
 
   return (
@@ -185,6 +193,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_lx</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_ly</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_主筋_本数</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_主筋_本数_X</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_主筋_本数_Y</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_主筋_直径</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Hoop_直径</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Hoop_距離_最大</th>
@@ -271,6 +281,30 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                       />
                     ) : (
                       row.mainReinforcementCount
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} main count x`}
+                        value={row.mainReinforcementCountX ?? ''}
+                        onChange={(e) => handlePatch(row, { mainReinforcementCountX: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.mainReinforcementCountX || '-'
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} main count y`}
+                        value={row.mainReinforcementCountY ?? ''}
+                        onChange={(e) => handlePatch(row, { mainReinforcementCountY: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.mainReinforcementCountY || '-'
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700 font-mono">

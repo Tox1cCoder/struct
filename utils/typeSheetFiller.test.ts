@@ -20,7 +20,7 @@ import {
   buildFramingTypeEntities,
 } from './templateSheets';
 
-const TEMPLATE_PATH = resolve(__dirname, '../samples/V2.4 TnfDesignInformation_v08_Template.xlsm');
+const TEMPLATE_PATH = resolve(__dirname, '../samples/V2.5 TnfDesignInformation_v08_Template.xlsm');
 
 const templateBytes = () => new Uint8Array(readFileSync(TEMPLATE_PATH));
 const read = (bytes: Uint8Array) => XLSX.read(bytes, { type: 'array' });
@@ -39,8 +39,8 @@ const configFor = (spec: Parameters<typeof autoDetectTypeSheetConfig>[2]) => {
 };
 
 const columns: ExpandedReinforcementData[] = [
-  { foundation: 'F1', columnType: 'FC1', bColumn: '800', hColumn: '800', dimensionWidth: '500', dimensionHeight: '500', mainReinforcementCount: '12', mainReinforcementSize: '22', hoopReinforcementSize: '10', hoopReinforcementSpacing: '100' },
-  { foundation: 'F2', columnType: 'FC2', bColumn: '900', hColumn: '900', dimensionWidth: '600', dimensionHeight: '600', mainReinforcementCount: '16', mainReinforcementSize: '25', hoopReinforcementSize: '13', hoopReinforcementSpacing: '150' },
+  { foundation: 'F1', columnType: 'FC1', bColumn: '800', hColumn: '800', dimensionWidth: '500', dimensionHeight: '500', mainReinforcementCount: '12', mainReinforcementCountX: '4', mainReinforcementCountY: '4', mainReinforcementSize: '22', hoopReinforcementSize: '10', hoopReinforcementSpacing: '100' },
+  { foundation: 'F2', columnType: 'FC2', bColumn: '900', hColumn: '900', dimensionWidth: '600', dimensionHeight: '600', mainReinforcementCount: '16', mainReinforcementCountX: '5', mainReinforcementCountY: '5', mainReinforcementSize: '25', hoopReinforcementSize: '13', hoopReinforcementSpacing: '150' },
 ];
 
 const priority: FoundationPriorityWorkingRow[] = [
@@ -108,8 +108,12 @@ describe('autoDetectTypeSheetConfig', () => {
     expect(byRow.get(24)).toBe('dimensionHeight');
     expect(byRow.get(29)).toBe('mainReinforcementCount');
     expect(byRow.get(32)).toBe('hoopReinforcementSpacing');
-    expect(byRow.get(33)).toBe('bColumn');
-    expect(byRow.get(34)).toBe('hColumn');
+    expect(byRow.get(33)).toBe('mainReinforcementCountX');
+    expect(byRow.get(34)).toBe('mainReinforcementCountY');
+    expect(byRow.get(37)).toBe('bColumn');
+    expect(byRow.get(38)).toBe('hColumn');
+    // Nothing in the drawings speaks to the hoop XY rows, so they map to no field.
+    for (const row of [35, 36]) expect(byRow.get(row)).toBeNull();
   });
 
   it('reads the FoundationInstance layout', () => {
@@ -157,8 +161,10 @@ describe('fillTypeSheet — FoundationType', () => {
     expect(at(out, 'FoundationType', 'D30')).toBe('22'); //  柱型_主筋_直径
     expect(at(out, 'FoundationType', 'D31')).toBe('10'); //  柱型_Hoop_直径
     expect(at(out, 'FoundationType', 'D32')).toBe('100'); // 柱型_Hoop_距離_最大
-    expect(at(out, 'FoundationType', 'D33')).toBe('800'); // 柱_Lx
-    expect(at(out, 'FoundationType', 'D34')).toBe('800'); // 柱_Ly
+    expect(at(out, 'FoundationType', 'D33')).toBe('4'); //   柱型_主筋_本数_X
+    expect(at(out, 'FoundationType', 'D34')).toBe('4'); //   柱型_主筋_本数_Y
+    expect(at(out, 'FoundationType', 'D37')).toBe('800'); // 柱_Lx
+    expect(at(out, 'FoundationType', 'D38')).toBe('800'); // 柱_Ly
     expect(at(out, 'FoundationType', 'E23')).toBe('600');
   });
 
@@ -176,7 +182,9 @@ describe('fillTypeSheet — FoundationType', () => {
 
   it('leaves parameters the extractor cannot supply blank', () => {
     const out = fill();
-    for (const addr of ['D9', 'D15', 'D17', 'D19', 'D25', 'D26', 'D27', 'D35']) {
+    // D35/D36 are the hoop XY rows — no drawing states them, so they stay blank.
+    const unmapped = ['D9', 'D15', 'D17', 'D19', 'D25', 'D26', 'D27', 'D39'];
+    for (const addr of [...unmapped, 'D35', 'D36']) {
       expect(at(out, 'FoundationType', addr)).toBe('');
     }
   });

@@ -48,6 +48,65 @@ export function parseDimensions(value: string): { width: string; height: string 
 }
 
 /**
+ * Split a perimeter main-bar count into per-direction counts.
+ *
+ * Column-stub bars run around the perimeter, so the total and the per-side
+ * counts are tied together by total = 2 × (nx + ny) − 4: each of the four corner
+ * bars is counted by an X side and a Y side at once. That fixes nx + ny but not
+ * how it divides, so the gaps between bars are shared out in proportion to the
+ * side lengths — which is the same as keeping the bar pitch even all the way
+ * round, and hands the longer side the extra bar.
+ *
+ * The drawings state only the total, so this is a reconstruction, not a reading.
+ * Anything that cannot sit on a perimeter — an odd total, fewer than four bars,
+ * a count that never parsed, a missing side length — returns blanks instead of a
+ * number nobody can justify.
+ */
+export function deriveMainBarSplit(
+  count: string,
+  width: string,
+  height: string,
+): { x: string; y: string } {
+  const blank = { x: '', y: '' };
+
+  const total = Number(count);
+  if (!Number.isInteger(total) || total < 4 || total % 2 !== 0) return blank;
+
+  const lx = Number(width);
+  const ly = Number(height);
+  if (!(lx > 0) || !(ly > 0)) return blank;
+
+  const perSide = total / 2 + 2; // nx + ny
+  const gaps = perSide - 2; // (nx − 1) + (ny − 1)
+  const gapsX = Math.min(Math.max(Math.round((gaps * lx) / (lx + ly)), 1), gaps - 1);
+
+  return { x: String(gapsX + 1), y: String(gaps - gapsX + 1) };
+}
+
+/**
+ * Keep a row's derived split in step with a hand edit.
+ *
+ * An edit to the total or to either side length invalidates the split, so it is
+ * recomputed. An edit to the split itself is the user overruling the
+ * reconstruction and passes through untouched.
+ */
+export function withDerivedMainBarSplit(
+  row: ExpandedReinforcementData,
+  patch: Partial<ExpandedReinforcementData>,
+): Partial<ExpandedReinforcementData> {
+  const derivedFrom = ['mainReinforcementCount', 'dimensionWidth', 'dimensionHeight'] as const;
+  if (!derivedFrom.some((field) => field in patch)) return patch;
+
+  const next = { ...row, ...patch };
+  const split = deriveMainBarSplit(
+    next.mainReinforcementCount,
+    next.dimensionWidth,
+    next.dimensionHeight,
+  );
+  return { ...patch, mainReinforcementCountX: split.x, mainReinforcementCountY: split.y };
+}
+
+/**
  * Split column types (e.g., "F21C,F23,F24" → ["F21C", "F23", "F24"])
  */
 export function splitColumnTypes(columnType: string): string[] {
@@ -71,6 +130,8 @@ export function transformForExport(data: ColumnReinforcementData[]): ExpandedRei
     const mainReinf = parseMainReinforcement(item.mainReinforcement);
     const hoopReinf = parseHoopReinforcement(item.hoopReinforcement);
 
+    const mainBarSplit = deriveMainBarSplit(mainReinf.count, dimensions.width, dimensions.height);
+
     // Create a row for each column type
     for (const colType of columnTypes) {
       result.push({
@@ -78,6 +139,8 @@ export function transformForExport(data: ColumnReinforcementData[]): ExpandedRei
         dimensionWidth: dimensions.width,
         dimensionHeight: dimensions.height,
         mainReinforcementCount: mainReinf.count,
+        mainReinforcementCountX: mainBarSplit.x,
+        mainReinforcementCountY: mainBarSplit.y,
         mainReinforcementSize: mainReinf.size,
         hoopReinforcementSize: hoopReinf.size,
         hoopReinforcementSpacing: hoopReinf.spacing,

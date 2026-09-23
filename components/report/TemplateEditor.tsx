@@ -7,6 +7,8 @@ const SOURCE_FIELD_OPTIONS: { value: SourceField; label: string }[] = [
   { value: 'dimensionWidth', label: '柱型_Lx' },
   { value: 'dimensionHeight', label: '柱型_Ly' },
   { value: 'mainReinforcementCount', label: '柱型_主筋_本数' },
+  { value: 'mainReinforcementCountX', label: '柱型_主筋_本数_X' },
+  { value: 'mainReinforcementCountY', label: '柱型_主筋_本数_Y' },
   { value: 'mainReinforcementSize', label: '柱型_主筋_直径' },
   { value: 'hoopReinforcementSize', label: '柱型_Hoop_直径' },
   { value: 'hoopReinforcementSpacing', label: '柱型_Hoop_距離_最大' },

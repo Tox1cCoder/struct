@@ -27,6 +27,15 @@ export function buildDefaultTemplate(): ReportTemplate {
       },
       {
         id: uid(),
+        name: 'HashiraGata Main Rebar XY',
+        color: 'orange',
+        params: [
+          { id: uid(), label: '柱型_主筋_本数_X', sourceField: 'mainReinforcementCountX' },
+          { id: uid(), label: '柱型_主筋_本数_Y', sourceField: 'mainReinforcementCountY' },
+        ],
+      },
+      {
+        id: uid(),
         name: 'HashiraGata Hoop Rebar',
         color: 'yellow',
         params: [

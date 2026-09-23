@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import type { ExpandedReinforcementData, FoundationPriorityWorkingRow, FrameData } from '../../types';
 import { ReportTab } from './ReportTab';
 
-const TEMPLATE_PATH = resolve(__dirname, '../../samples/V2.4 TnfDesignInformation_v08_Template.xlsm');
+const TEMPLATE_PATH = resolve(__dirname, '../../samples/V2.5 TnfDesignInformation_v08_Template.xlsm');
 
 /** Hand the component the real template through its file input. */
 async function uploadTemplate(user: ReturnType<typeof userEvent.setup>) {
