@@ -15,6 +15,7 @@ import {
   PriorityPipelineDiagnostics,
 } from "../types";
 import { parseBoundingBox, parsePage } from "../utils/boundingBox";
+import { parseTieCount } from "../utils/dataTransform";
 import { normalizeFrameData } from "../utils/frameData";
 import { FRAME_IMAGE_MODEL, selectColumnRequestPolicy } from './geminiRequestPolicy';
 import {
@@ -69,6 +70,28 @@ const SPATIAL_INSTRUCTION_IMAGE = `
 For each extracted item, also return "bbox": an object {"ymin": number, "xmin": number, "ymax": number, "xmax": number} giving normalized 0-1000 coordinates of the rectangle that tightly bounds the extracted data within the image. Use top-left origin (ymin/xmin = upper-left, ymax/xmax = lower-right).
 
 If you cannot localize an item confidently, omit "bbox" rather than guessing.
+`;
+
+/**
+ * Supplementary hoop ties are only ever drawn, never written out, so they can be
+ * counted solely from a cross-section figure. Image inputs (column list tables)
+ * carry one; the certified-base PDFs do not, so this instruction and its two
+ * response fields are attached to image requests only, and PDF rows default to 0.
+ */
+export const HOOP_SUPPLEMENT_INSTRUCTION = `
+
+**Supplementary hoop ties (中子筋) — count them from the drawing:**
+Look at the column cross-section figure in the "断面" cell. Ignore all text for this.
+*   Inside the outer hoop rectangle, count the straight internal tie lines that span
+    the whole section, face to opposite face.
+*   Return the number of VERTICAL internal lines as "hoopSupplementaryX", and the
+    number of HORIZONTAL internal lines as "hoopSupplementaryY".
+*   Example: a section split into a 3×3 grid has 2 vertical and 2 horizontal internal
+    lines, so hoopSupplementaryX = 2 and hoopSupplementaryY = 2.
+*   Do NOT count the outer hoop rectangle, the main bars, dimension lines, leader or
+    extension lines, or anything drawn outside the section outline.
+*   Return 0 when the section has no internal tie lines, and 0 when the row has no
+    cross-section figure at all. Never infer a non-zero count from text.
 `;
 
 const FOUNDATION_PRIORITY_SPATIAL_INSTRUCTION_PDF = `
@@ -347,6 +370,7 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
 
   const ai = new GoogleGenAI({ apiKey });
   const requestPolicy = selectColumnRequestPolicy(mimeType);
+  const isPdf = mimeType === 'application/pdf';
   const finalPrompt = `
     ${REINFORCEMENT_SYSTEM_PROMPT}
 
@@ -358,6 +382,7 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
     **OUTPUT FORMAT:**
     Strictly output a valid JSON array based on the schema provided. Do not wrap it in Markdown fences or add commentary.
     ${mimeType === 'application/pdf' ? SPATIAL_INSTRUCTION_PDF : SPATIAL_INSTRUCTION_IMAGE}
+    ${isPdf ? '' : HOOP_SUPPLEMENT_INSTRUCTION}
   `;
 
   try {
@@ -405,6 +430,20 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
                 type: Type.STRING,
                 description: "Extracted value for '帯筋' (Hoop Bar). Omit material grade like (SD295)."
               },
+              // Countable from a cross-section figure only, which PDFs of the
+              // certified base sheets never carry.
+              ...(isPdf
+                ? {}
+                : {
+                    hoopSupplementaryX: {
+                      type: Type.INTEGER,
+                      description: 'Number of vertical internal tie lines in the 断面 cross-section figure. 0 when there are none or there is no figure.'
+                    },
+                    hoopSupplementaryY: {
+                      type: Type.INTEGER,
+                      description: 'Number of horizontal internal tie lines in the 断面 cross-section figure. 0 when there are none or there is no figure.'
+                    },
+                  }),
               page: {
                 type: Type.NUMBER,
                 description: '1-indexed PDF page number where the data was found. Omit for single-image inputs.'
@@ -465,6 +504,8 @@ export const extractDataFromPdf = async (base64Data: string, mimeType: string): 
       columnDimensions: item.columnDimensions,
       mainReinforcement: cleanValue(item.mainReinforcement),
       hoopReinforcement: cleanValue(item.hoopReinforcement),
+      hoopSupplementaryX: parseTieCount(item.hoopSupplementaryX),
+      hoopSupplementaryY: parseTieCount(item.hoopSupplementaryY),
       page: parsePage(item.page),
       bbox: parseBoundingBox(item.bbox),
     }));

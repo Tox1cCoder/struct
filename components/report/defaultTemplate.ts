@@ -43,6 +43,15 @@ export function buildDefaultTemplate(): ReportTemplate {
           { id: uid(), label: '柱型_Hoop_距離_最大', sourceField: 'hoopReinforcementSpacing' },
         ],
       },
+      {
+        id: uid(),
+        name: 'HashiraGata Hoop Rebar XY',
+        color: 'yellow',
+        params: [
+          { id: uid(), label: '柱型_Hoop_X_補強', sourceField: 'hoopSupplementaryX' },
+          { id: uid(), label: '柱型_Hoop_Y_補強', sourceField: 'hoopSupplementaryY' },
+        ],
+      },
     ],
   };
 }

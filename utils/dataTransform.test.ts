@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { deriveMainBarSplit, transformForExport, withDerivedMainBarSplit } from './dataTransform';
+import {
+  deriveMainBarSplit,
+  parseTieCount,
+  transformForExport,
+  withDerivedMainBarSplit,
+} from './dataTransform';
 
 describe('transformForExport dimensions', () => {
   it('uses a single square column dimension for both lx and ly', () => {
@@ -69,6 +74,46 @@ describe('transformForExport main bar split', () => {
       mainReinforcementCountX: '5',
       mainReinforcementCountY: '5',
     });
+  });
+});
+
+describe('parseTieCount', () => {
+  it('keeps a counted number of lines', () => {
+    expect(parseTieCount(2)).toBe('2');
+    expect(parseTieCount('3')).toBe('3');
+    expect(parseTieCount(0)).toBe('0');
+  });
+
+  it('reads anything uncountable as none', () => {
+    expect(parseTieCount(undefined)).toBe('0');
+    expect(parseTieCount(null)).toBe('0');
+    expect(parseTieCount('')).toBe('0');
+    expect(parseTieCount('two')).toBe('0');
+    expect(parseTieCount(1.5)).toBe('0');
+    expect(parseTieCount(-2)).toBe('0');
+  });
+});
+
+describe('transformForExport supplementary hoop ties', () => {
+  const sheet = {
+    columnType: 'FC1',
+    columnDimensions: '1,400×1,400',
+    mainReinforcement: '36-D32',
+    hoopReinforcement: 'D16@100',
+  };
+
+  it('carries the counted tie lines through', () => {
+    const [row] = transformForExport([
+      { ...sheet, hoopSupplementaryX: '2', hoopSupplementaryY: '2' },
+    ]);
+
+    expect(row).toMatchObject({ hoopSupplementaryX: '2', hoopSupplementaryY: '2' });
+  });
+
+  it('reads an absent count as none rather than blank', () => {
+    const [row] = transformForExport([sheet]);
+
+    expect(row).toMatchObject({ hoopSupplementaryX: '0', hoopSupplementaryY: '0' });
   });
 });
 

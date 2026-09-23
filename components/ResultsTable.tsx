@@ -68,6 +68,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
         '柱型_主筋_直径',
         '柱型_Hoop_直径',
         '柱型_Hoop_距離_最大',
+        '柱型_Hoop_X_補強',
+        '柱型_Hoop_Y_補強',
       );
       if (hasBHData) {
         headers.push('柱_lx');
@@ -87,6 +89,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
           row.mainReinforcementSize,
           row.hoopReinforcementSize,
           row.hoopReinforcementSpacing,
+          row.hoopSupplementaryX || '',
+          row.hoopSupplementaryY || '',
         );
         if (hasBHData) {
           cells.push(row.bColumn || '');
@@ -112,6 +116,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
         { wch: 10 },
         { wch: 10 },
         { wch: 12 },
+        { wch: 14 },
+        { wch: 14 },
       );
       if (hasBHData) {
         colWidths.push({ wch: 8 });
@@ -198,6 +204,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_主筋_直径</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Hoop_直径</th>
               <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Hoop_距離_最大</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Hoop_X_補強</th>
+              <th className="px-4 py-3 font-semibold border-b border-gray-200">柱型_Hoop_Y_補強</th>
               {hasBHData && (
                 <>
                   <th className="px-4 py-3 font-semibold border-b border-gray-200">柱_lx</th>
@@ -341,6 +349,30 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                       />
                     ) : (
                       row.hoopReinforcementSpacing
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} hoop supplementary x`}
+                        value={row.hoopSupplementaryX ?? ''}
+                        onChange={(e) => handlePatch(row, { hoopSupplementaryX: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.hoopSupplementaryX || '-'
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700 font-mono">
+                    {editable ? (
+                      <input
+                        aria-label={`${label} hoop supplementary y`}
+                        value={row.hoopSupplementaryY ?? ''}
+                        onChange={(e) => handlePatch(row, { hoopSupplementaryY: e.target.value })}
+                        className="w-16 rounded border border-gray-200 px-2 py-1 font-mono text-sm"
+                      />
+                    ) : (
+                      row.hoopSupplementaryY || '-'
                     )}
                   </td>
                   {hasBHData && (

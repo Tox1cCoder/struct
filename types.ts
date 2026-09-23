@@ -15,6 +15,9 @@ export interface ColumnReinforcementData {
   columnDimensions: string;
   mainReinforcement: string;
   hoopReinforcement: string;
+  /** Internal hoop tie lines counted in the 断面 figure; absent means none. */
+  hoopSupplementaryX?: string;
+  hoopSupplementaryY?: string;
   sourceFileName?: string;
   sourceFileId?: string;
   page?: number;
@@ -43,6 +46,9 @@ export interface ExpandedReinforcementData {
   mainReinforcementSize: string;
   hoopReinforcementSize: string;
   hoopReinforcementSpacing: string;
+  /** Internal hoop tie lines per direction, counted from a cross-section figure. */
+  hoopSupplementaryX?: string;
+  hoopSupplementaryY?: string;
   sourceFileId?: string;
   page?: number;
   bbox?: BoundingBox;
@@ -168,6 +174,8 @@ export type SourceField =
   | 'mainReinforcementSize'
   | 'hoopReinforcementSize'
   | 'hoopReinforcementSpacing'
+  | 'hoopSupplementaryX'
+  | 'hoopSupplementaryY'
   | 'bColumn'
   | 'hColumn';
 

@@ -48,6 +48,19 @@ export function parseDimensions(value: string): { width: string; height: string 
 }
 
 /**
+ * Read a supplementary hoop tie count off a model response.
+ *
+ * The count is a number of drawn lines, so anything that is not a non-negative
+ * whole number — a missing field, prose, a fraction — means none were counted
+ * and reads as "0" rather than propagating an unusable value.
+ */
+export function parseTieCount(value: unknown): string {
+  const n = typeof value === 'string' ? Number(value.trim()) : value;
+  if (typeof n !== 'number' || !Number.isInteger(n) || n < 0) return '0';
+  return String(n);
+}
+
+/**
  * Split a perimeter main-bar count into per-direction counts.
  *
  * Column-stub bars run around the perimeter, so the total and the per-side
@@ -144,6 +157,9 @@ export function transformForExport(data: ColumnReinforcementData[]): ExpandedRei
         mainReinforcementSize: mainReinf.size,
         hoopReinforcementSize: hoopReinf.size,
         hoopReinforcementSpacing: hoopReinf.spacing,
+        // No cross-section figure to count means no supplementary ties.
+        hoopSupplementaryX: item.hoopSupplementaryX ?? '0',
+        hoopSupplementaryY: item.hoopSupplementaryY ?? '0',
         sourceFileId: item.sourceFileId,
         page: item.page,
         bbox: item.bbox,

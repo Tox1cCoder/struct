@@ -6,6 +6,7 @@ import {
   FRAME_SYSTEM_PROMPT,
   FOUNDATION_PLAN_DIRECT_MAPPING_PROMPT,
   FOUNDATION_PLAN_COORDINATE_PROMPT,
+  HOOP_SUPPLEMENT_INSTRUCTION,
   REINFORCEMENT_SYSTEM_PROMPT,
 } from './geminiService';
 
@@ -36,6 +37,37 @@ describe('REINFORCEMENT_SYSTEM_PROMPT column/row selection', () => {
     expect(REINFORCEMENT_SYSTEM_PROMPT).toContain('基礎柱形主筋');
     expect(REINFORCEMENT_SYSTEM_PROMPT).toContain('帯筋');
     expect(REINFORCEMENT_SYSTEM_PROMPT).toContain('柱形');
+  });
+});
+
+// The supplementary tie counts exist only as lines in a cross-section figure, so
+// the instruction has to fix the axis convention and forbid reading them off text.
+describe('HOOP_SUPPLEMENT_INSTRUCTION tie counting', () => {
+  it('counts from the 断面 figure, not from any text', () => {
+    expect(HOOP_SUPPLEMENT_INSTRUCTION).toContain('断面');
+    expect(HOOP_SUPPLEMENT_INSTRUCTION).toMatch(/Never infer a non-zero count from text/i);
+  });
+
+  it('maps vertical lines to X and horizontal lines to Y', () => {
+    expect(HOOP_SUPPLEMENT_INSTRUCTION).toMatch(/VERTICAL internal lines as "hoopSupplementaryX"/);
+    expect(HOOP_SUPPLEMENT_INSTRUCTION).toMatch(/HORIZONTAL internal lines as "hoopSupplementaryY"/);
+  });
+
+  it('gives the 3×3 grid worked example', () => {
+    expect(HOOP_SUPPLEMENT_INSTRUCTION).toMatch(
+      /3×3 grid[^]*hoopSupplementaryX = 2 and hoopSupplementaryY = 2/,
+    );
+  });
+
+  it('excludes the hoop rectangle and everything outside the section', () => {
+    expect(HOOP_SUPPLEMENT_INSTRUCTION).toMatch(
+      /Do NOT count the outer hoop rectangle[^]*outside the section outline/,
+    );
+  });
+
+  it('defaults to zero instead of omitting the count', () => {
+    expect(HOOP_SUPPLEMENT_INSTRUCTION).toMatch(/Return 0 when the section has no internal tie/);
+    expect(HOOP_SUPPLEMENT_INSTRUCTION).toMatch(/0 when the row has no\s+cross-section figure/);
   });
 });
 
