@@ -2,6 +2,8 @@ import type { PageSegment } from './pdfPageGeometry';
 
 const AXIS_TOLERANCE = 0.05;
 const CLUSTER_WIDTH = 1.5;
+/** Drawn length a line needs, as a share of the minimum extent (dash-dot lines leave gaps). */
+const MIN_DRAWN_SHARE = 0.5;
 
 interface LinePiece {
   position: number;
@@ -32,13 +34,30 @@ const summarize = (cluster: LinePiece[]) => {
   );
   const extent =
     Math.max(...cluster.map((piece) => piece.to)) - Math.min(...cluster.map((piece) => piece.from));
-  return { position: weighted / length, extent };
+  return { position: weighted / length, extent, length };
 };
+
+interface LineSummary {
+  position: number;
+  length: number;
+}
+
+/** Surviving lines closer than one cluster width are halves of one CAD double line. */
+const mergeNearby = (lines: LineSummary[]): LineSummary[] =>
+  lines.reduce<LineSummary[]>((merged, line) => {
+    const previous = merged[merged.length - 1];
+    if (!previous || line.position - previous.position > CLUSTER_WIDTH) return [...merged, line];
+    const length = previous.length + line.length;
+    const position = (previous.position * previous.length + line.position * line.length) / length;
+    return [...merged.slice(0, -1), { position, length }];
+  }, []);
 
 /**
  * Positions of long straight lines in one orientation. Dashes of one line and CAD
- * double lines collapse into a single position; lines spanning less than
- * `minExtent` are dropped.
+ * double lines collapse into a single position. A line must span `minExtent` and be
+ * drawn for at least half of it; short strokes that only happen to line up down the
+ * page (marker box edges, glyphs) would otherwise pass as lines and crowd the
+ * candidates until any grid fit finds a match.
  */
 export const clusterLinePositions = (
   segments: PageSegment[],
@@ -57,10 +76,11 @@ export const clusterLinePositions = (
     else clusters.push([piece]);
   }
 
-  return clusters
+  const lines = clusters
     .map(summarize)
-    .filter((cluster) => cluster.extent >= minExtent)
-    .map((cluster) => Math.round(cluster.position * 100) / 100);
+    .filter((cluster) =>
+      cluster.extent >= minExtent && cluster.length >= minExtent * MIN_DRAWN_SHARE);
+  return mergeNearby(lines).map((line) => Math.round(line.position * 100) / 100);
 };
 
 const nearestIndex = (sorted: number[], value: number) => {

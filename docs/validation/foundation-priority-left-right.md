@@ -1,111 +1,100 @@
 # Foundation Priority Validation — Left.pdf / Right.pdf
 
-**Status:** Automated source review and live API candidate runs recorded on 2026-07-28. Browser click-through remains pending because no in-app browser was available in the verification environment.
+**Status:** Verified 2026-09-29 on branch `fix/priority-geometric-join`. The results below come from the automated golden test and a live browser run (Edge, headless, dev server).
 
 ## Inputs
 
-- 認定柱脚資料: `Left.pdf` (6 pages, certified column base details)
-- 基礎伏図: `Right.pdf` (1 page, foundation plan with FC/F/X/Y labels)
+- 認定柱脚資料: `Left.pdf` (= `「ラ・ムー南港店」　認定柱脚資料.pdf`), 6 pages. Page 1 is the placement map.
+- 基礎伏図: `Right.pdf` (= `「ラ・ムー南港店」　基礎図　2026.05.08-Model.pdf`), 1 page, rotated 270°.
 
-## Procedure
+## Verified expected output
 
-1. Start dev server with `VITE_GEMINI_API_KEY` set:
-   ```powershell
-   npm run dev
-   ```
-2. Open the Foundation Priority tab.
-3. Upload `Left.pdf` as 認定柱脚資料 and `Right.pdf` as 基礎伏図.
-4. After extraction completes:
-   - Record the StatusStrip diagnostic line for each file (duration + pass).
-   - Copy the merged text from the result panel.
-   - Expand each row's evidence; confirm 基礎伏図 is the default and 認定柱脚資料 is available where matched.
-5. Compare every output code with the visible PDFs and note any discrepancies.
-
-## Reviewed Expected Output
-
-Extraction continues to preserve the certified label after removing its display apostrophe (`1'C1` → `1C1`). Generated results then remove the numeric prefix (`1C1` → `C1`) before display and merging.
+The expected output was verified two independent ways, and both agree:
+1. a 600-dpi visual read of both sheets
+2. a vector-geometry join computed from the PDFs
 
 ```text
 F1: C1, C2, C4
 F1A: FC1
-F1B: unresolved — confirm two between-grid placements in the evidence viewer
-F2: C1, P1, P2
-F2A: unresolved — confirm the adjacent 1C6/P2 evidence at Y7A
+F1B: C3
+F2: C1, P2
+F2A: C6
 F3: C5
 F3A: C1
-F4: P1
+F4: P1, P2
 F5: C3
-F6: C1
-F7: C3, C1
-F8: C3
-F9: C4
+F6: C1, C3, P1
+F7: C1, C3, P1
+F8: C1, C3
+F9: P1
 F9A: FC1
 F10: C1
 ```
 
-`F1A` and `F9A` originate from visible plan `FC1` labels. Other resolved codes use the certified placement map. The two explicitly unresolved labels are retained in the golden fixture so extraction coverage cannot silently omit them.
+Code order within a row is not significant.
 
-## Diagnostics (record after live run)
+Rules applied:
+- **Every code in a footing is listed.** Each code whose marker lies inside a footing is reported, including P1/P2 posts.
+- **Combined footings list every column.** F6, F7 and F8 each cover two grid intersections.
+- **FC codes win.** F1A and F9A carry FC1 in the plan, so FC1 replaces the certified codes.
+- **Grade-beam posts are excluded.** 26 P1 posts sit on grade beams outside every footing.
 
-| File | Pass used | Upload (s) | Primary gen (s) | Primary validate (s) | Fallback gen (s) | Fallback validate (s) | Total (s) |
-| ---- | --------- | ---------- | --------------- | -------------------- | ---------------- | --------------------- | --------- |
-| Left.pdf, legacy independent run 1 | primary | 0.3 | 46.8 | <0.1 | — | — | 47.1 |
-| Right.pdf, legacy independent run 1 | escalated | 0.1 | 35.5 | <0.1 | 24.0 | <0.1 | 59.5 |
-| Left.pdf, legacy independent run 2 | primary | 0.4 | 23.3 | <0.1 | — | — | 23.7 |
-| Right.pdf, legacy independent run 2 | escalated | 0.1 | 41.1 | <0.1 | 74.1 | <0.1 | 115.3 |
+### Earlier fixture was wrong
 
-The independent-coordinate pipeline achieved full label coverage but only 1/13 exact reviewed resolved mappings in both runs. It was therefore rejected despite passing its structural coverage gate.
+The previous "reviewed" fixture disagreed with the drawings on 8 of 15 rows:
 
-The replacement paired-quadrant pipeline renders four corresponding high-resolution regions from page 1 of both PDFs and sends the four region pairs concurrently to Gemini 3.1 Pro Preview with medium thinking. Live candidate results:
+| Row | Old fixture | Drawings |
+| --- | --- | --- |
+| F1B | unresolved | C3 (X3A/Y8, X2C/Y7A) |
+| F2 | C1, P1, P2 | C1, P2 |
+| F2A | unresolved | C6 (X3/Y7A) |
+| F4 | P1 | P1, P2 (P2 at X2C/Y7) |
+| F6 | C1 | C1, C3, P1 |
+| F7 | C3, C1 | C3, C1, P1 |
+| F8 | C3 | C3, C1 |
+| F9 | C4 | P1 |
 
-| Run | Wall time | Exact reviewed resolved mappings | Notes |
-| --- | --------- | -------------------------------- | ----- |
-| 1 | 81.1 s | 10/13 | FC precedence applied; remaining errors concentrated in F2/F9/F4 aggregation. |
-| 2 | 77.6 s | 11/13 | Exact-grid prompt recovered F2 and F4; F1 had one extra candidate and F9 remained incorrect. |
+The "10/13" and "11/13" accuracy figures recorded for the Gemini quadrant pipeline were measured against that fixture, so they did not measure accuracy.
 
-## Evidence coverage
+## What the PDFs contain
 
-| Foundation | Code | Plan page | Certified page | Notes |
-| ---------- | ---- | --------- | -------------- | ----- |
-| F1 | C1, C2, C4 | 1 | 1 | Multiple placements |
-| F1A | FC1 | 1 | — | Plan FC priority |
-| F1B | unresolved | 1 | 1 | Between-grid viewer confirmation required |
-| F2 | C1, P1, P2 | 1 | 1 | Multiple placements |
-| F2A | unresolved | 1 | 1 | Adjacent 1C6/P2 viewer confirmation required |
-| F3 | C5 | 1 | 1 | Certified fallback |
-| F3A | C1 | 1 | 1 | Certified fallback |
-| F4 | P1 | 1 | 1 | Repeated perimeter placements |
-| F5 | C3 | 1 | 1 | Certified fallback |
-| F6 | C1 | 1 | 1 | Certified fallback |
-| F7 | C3, C1 | 1 | 1 | Two placements |
-| F8 | C3 | 1 | 1 | Certified fallback |
-| F9 | C4 | 1 | 1 | Certified fallback |
-| F9A | FC1 | 1 | — | Plan FC priority |
-| F10 | C1 | 1 | 1 | Certified fallback |
+- **基礎伏図:** F/FC labels and grid labels are native text. Footings are 0.48 pt stroked rectangles, and all 44 labels have one.
+- **Certified map annotations:** the 76 colour markers on 認定柱脚資料 page 1 are PDF Square markup annotations.
+- **Embedded labels:** AutoCAD exported its stroke-font text as invisible "AutoCAD SHX Text" annotations, which carry the real characters. They give the code of 73 markers. The three C2 labels have no such annotation and are read by Gemini from rendered crops.
+- **Grid label mismatch:** the certified sheet prints the third X grid line as `X2A`, and the plan prints `X2C`. Grids are therefore matched by line order and spacing (scale ratio 1.379 on both axes), never by label.
 
-## Candidate Comparison (Task 10 Step 3)
+## Live browser run (2026-09-29)
 
-| Candidate | Primary config | Escalation config | Run 1 outcome | Run 2 outcome | Accept? |
-| --------- | -------------- | ----------------- | ------------- | ------------- | ------- |
-| A | Independent 3.1 Pro MEDIUM / MEDIUM PDFs | 3.1 Pro HIGH / MEDIUM PDF | 1/13, 106.6 s | 1/13, 139.0 s | No |
-| B | Joint 3.1 Pro MEDIUM / HIGH full-page images | none | 3/13, 68.3 s | — | No |
-| C | Four parallel joint quadrants, 3.1 Pro MEDIUM / HIGH images | none | 10/13, 81.1 s | 11/13, 77.6 s | Yes, best measured candidate |
+| Step | Time | Result |
+| --- | --- | --- |
+| Upload `Right.pdf` (plan) first | 0.3 s | 44 footings, no model call |
+| Then upload `Left.pdf` (certified) | 4.9 s | 76 markers, 1 Gemini request for 3 crops |
+| Rows shown | — | All 15 match the table above |
+| Evidence viewer | — | Plan and certified highlights land on the F8 footing and its C3 marker |
 
-## Decision
+The old pipeline took about 120 s per plan upload and returned different rows between runs.
 
-Use candidate C when both source PDFs are available, with deterministic native plan-label inventory, code canonicalization, and FC precedence. Keep the independent PDF pipeline as a fallback when paired browser rendering is unavailable.
+The only console error is the browser's automatic `/favicon.ico` request returning 404. The app ships no favicon.
 
-This is a material accuracy and latency improvement, but not a claim of perfect extraction: the two live runs reached 10/13 and 11/13 exact reviewed resolved rows. The UI must continue to expose warnings/evidence, and F1/F9 should receive manual review for this sample.
+## OCR fallback check
 
-## Automated regression record (2026-05-28)
+The same live check sent all 76 marker crops (not just the 3 unlabelled ones) to `readCertifiedMarkerCodes`. It read 76 of 76 correctly in 16.6 s. That is the expected behaviour for certified PDFs without SHX annotations.
 
-- `npm test`: 17 test files, 69 tests pass.
-- `npm run build`: succeeds with no `/index.css` warning and no chunk-size warning.
-  Largest chunk: `spreadsheet` 424 kB (xlsx). Tailwind moved off the CDN; PDF.js cMaps and standard fonts copied via `vite-plugin-static-copy`.
-- Pre-existing automated-test count before this branch was 7 files / 52 tests.
+## Automated coverage
 
-## Pending manual work (Task 12 — user runs)
+- `utils/foundationPriorityGolden.test.ts` runs the real PDFs through pdfjs in Node, with OCR stubbed from the verified reads. It asserts:
+  - the table above
+  - zero join warnings
+  - grid tokens for F7/F8/F1B/F2A
+  - certified evidence on every certified-fallback location
+  - that embedded labels agree with the visual reads
+  - that only the three C2 markers need OCR
+- Mutation checks: changing one verified read, or disabling grid-line snapping, makes the golden test fail.
+- `npx vitest run`: 44 files, 307 tests pass. `npx tsc --noEmit` and `npm run build` are clean.
 
-1. Multi-upload + edit acceptance (Task 12 Step 2) — exercise all four upload zones while one is processing; edit/add/delete and confirm persistence across edits and re-uploads.
-2. Foundation Priority acceptance with Left.pdf/Right.pdf (Task 12 Step 3) — compare merged text and evidence against the PDFs; record diagnostics here.
-3. Browser-console walkthrough on production preview (Task 12 Step 4) — `npm run preview`, open each tab, check DevTools console.
+## Re-running the browser check
+
+1. `npx vite --port 5199 --strictPort` (needs `VITE_GEMINI_API_KEY` in `.env` for the C2 crops).
+2. Open the Foundation Priority tab and upload `Right.pdf`, then `Left.pdf`, in either order.
+3. Compare the rows with the table above.
+4. Expand F8's evidence and check that both viewer sources highlight the footing and its marker.

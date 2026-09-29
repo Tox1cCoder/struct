@@ -101,6 +101,15 @@ A marker box surrounds its column symbol and label. For each axis, if exactly on
 - A golden test in the Node environment that runs the real pipeline on `Left.pdf` and `Right.pdf` through pdfjs, with OCR stubbed from the verified label reads (keyed by colour and grid position). It asserts the table above.
 - The existing suite stays green. The obsolete joint-pipeline tests are removed with the code.
 
+## Amendments during implementation (2026-09-29)
+
+- **Markers are annotations.** The 認定柱脚資料 colour markers are PDF Square markup annotations. The page walker handles `beginAnnotation`/`endAnnotation` as pdfjs does, starting from the base transform. Without this, the page content's leftover CTM put every marker at the page corner.
+- **Embedded labels replace most OCR (changes D5).** AutoCAD exports its stroke-font text as invisible "AutoCAD SHX Text" Square annotations that carry the characters. Page geometry returns them as text, and a marker takes its code from the one code-like text centred inside it. Gemini reads only the markers without one: 3 of 76 on the sample (the C2 labels).
+- **Scale agreement.** An axis with only two grid lines fits any candidate pair. The axis with more lines is registered first, and the other axis must agree on scale within 3%.
+- **No snapping of plan grid labels to vector lines.** Beam and wall edges run within 1–2 pt of grid lines and pulled positions off the grid. The bubble label centre is the line position.
+- **Lines must be drawn, not just aligned.** Clustering by extent alone made short marker-box edges and glyph strokes that line up down the page look like lines. That produced 97 X and 94 Y candidates about 3 pt apart, dense enough for almost any grid fit to find matches. A candidate now also needs a drawn length of at least half the minimum extent, and adjacent survivors within 1.5 pt merge as CAD double lines. On `Left.pdf` this leaves 11 X and 19 Y candidates: every grid line plus dimension and title-block lines, which the spacing fit skips.
+- **Viewer fix.** The source viewer's flex row stretched the page wrapper to the pane height, so highlights on landscape pages were scaled wrongly. The wrapper now hugs the page (`items-start`).
+
 ## Out of scope
 
 - Rotated or mirrored certified sheets relative to the plan.

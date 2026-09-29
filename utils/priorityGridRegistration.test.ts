@@ -37,6 +37,23 @@ describe('clusterLinePositions', () => {
     expect(clusterLinePositions(segments, 'horizontal', 300)).toEqual([50]);
   });
 
+  it('keeps a double line whole when a stray stroke nearby shifts where clustering starts', () => {
+    const positions = clusterLinePositions(
+      [vertical(99.3, 0, 4), ...dashed(100, 0, 500), ...dashed(100.9, 0, 500)],
+      'vertical',
+      300,
+    );
+    expect(positions).toHaveLength(1);
+    expect(positions[0]).toBeCloseTo(100.45, 1);
+  });
+
+  it('rejects short strokes that merely line up down the page, like marker box edges', () => {
+    const scattered = Array.from({ length: 20 }, (_, index) =>
+      vertical(200, index * 30, index * 30 + 5));
+    const positions = clusterLinePositions([...dashed(100, 0, 500), ...scattered], 'vertical', 300);
+    expect(positions).toEqual([100]);
+  });
+
   it('keeps two grid lines that are close but distinct', () => {
     const positions = clusterLinePositions(
       [...dashed(519.5, 0, 500), ...dashed(537.7, 0, 500)],
