@@ -90,7 +90,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-auto bg-gray-100">
-      <div className="flex min-h-full justify-center p-4">
+      <div className="flex min-h-full items-start justify-center p-4">
         <div ref={contentRef} className="relative inline-block bg-white shadow-md">
           {isPdf && (
             <Document
