@@ -17,6 +17,7 @@ export interface CertifiedCoordinateRow extends CoordinateSource {
   xAxis: string;
   yAxis: string;
   columnType: string;
+  locationKey?: string;
 }
 
 export interface FoundationPlanCoordinateRow extends CoordinateSource {
@@ -24,6 +25,7 @@ export interface FoundationPlanCoordinateRow extends CoordinateSource {
   xAxis: string;
   yAxis: string;
   planColumnType: string;
+  locationKey?: string;
 }
 
 export interface FoundationPriorityTextResult {
@@ -65,6 +67,7 @@ const normalizeCertifiedRow = (row: CertifiedCoordinateRow): CertifiedCoordinate
     xAxis,
     yAxis,
     columnType,
+    locationKey: row.locationKey,
     sourceFileId: row.sourceFileId,
     page: row.page,
     bbox: row.bbox,
@@ -87,6 +90,7 @@ const normalizeFoundationPlanRow = (row: FoundationPlanCoordinateRow): Foundatio
     xAxis: hasReadableCoordinate ? xAxis : '',
     yAxis: hasReadableCoordinate ? yAxis : '',
     planColumnType,
+    locationKey: row.locationKey,
     sourceFileId: row.sourceFileId,
     page: row.page,
     bbox: row.bbox,
@@ -118,7 +122,8 @@ export const buildFoundationPriorityText = (
     const normalizedRow = normalizeCertifiedRow(row);
     if (!normalizedRow) continue;
 
-    const key = toCoordinateKey(normalizedRow.xAxis, normalizedRow.yAxis);
+    const key =
+      normalizedRow.locationKey ?? toCoordinateKey(normalizedRow.xAxis, normalizedRow.yAxis);
     if (!certifiedByCoordinate.has(key)) {
       certifiedByCoordinate.set(key, normalizedRow);
     } else {
@@ -151,8 +156,9 @@ export const buildFoundationPriorityText = (
     const planColumnType = normalizedRow.planColumnType;
     const hasFc = isValidColumnCode(planColumnType) && isFcCode(planColumnType);
     const hasReadableCoordinate = isValidAxis(normalizedRow.xAxis) && isValidAxis(normalizedRow.yAxis);
-    const coordKey = hasReadableCoordinate ? toCoordinateKey(normalizedRow.xAxis, normalizedRow.yAxis) : '';
-    const certifiedMatch = hasReadableCoordinate ? certifiedByCoordinate.get(coordKey) : undefined;
+    const coordKey = normalizedRow.locationKey ??
+      (hasReadableCoordinate ? toCoordinateKey(normalizedRow.xAxis, normalizedRow.yAxis) : '');
+    const certifiedMatch = coordKey ? certifiedByCoordinate.get(coordKey) : undefined;
 
     let resolvedColumnType: string | null = null;
     let method: FoundationPriorityResolution['method'] | null = null;
@@ -214,7 +220,9 @@ export const buildFoundationPriorityText = (
     };
 
     const evidenceLocation: FoundationPriorityEvidenceLocation = {
-      evidenceId: `${normalizedRow.foundation}:${normalizedRow.xAxis}:${normalizedRow.yAxis}`,
+      evidenceId: `${normalizedRow.foundation}:${
+        normalizedRow.locationKey ?? `${normalizedRow.xAxis}:${normalizedRow.yAxis}`
+      }`,
       plan: planForLocation,
       ...(certifiedEvidence ? { certified: certifiedEvidence } : {}),
     };

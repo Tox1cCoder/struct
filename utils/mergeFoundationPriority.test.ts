@@ -1,6 +1,29 @@
 import { describe, expect, it } from 'vitest';
 
 describe('buildFoundationPriorityText', () => {
+  it('pairs rows by location key so placements sharing X/Y tokens stay distinct', async () => {
+    const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
+
+    const result = buildFoundationPriorityText(
+      [
+        { xAxis: 'X1-X2', yAxis: 'Y8', columnType: 'P1', locationKey: 'c:m1', sourceFileId: 'cert' },
+        { xAxis: 'X1-X2', yAxis: 'Y8', columnType: 'P2', locationKey: 'c:m2', sourceFileId: 'cert' },
+      ],
+      [
+        { foundation: 'F4', xAxis: 'X1-X2', yAxis: 'Y8', planColumnType: '', locationKey: 'c:m1' },
+        { foundation: 'F4', xAxis: 'X1-X2', yAxis: 'Y8', planColumnType: '', locationKey: 'c:m2' },
+      ],
+    );
+
+    expect(result.lines).toEqual(['F4: P1, P2']);
+    const locations = result.rows[0].resolutions.flatMap((resolution) => resolution.locations);
+    expect(locations.map((location) => location.evidenceId)).toEqual(['F4:c:m1', 'F4:c:m2']);
+    expect(result.rows[0].resolutions.map((resolution) => resolution.method)).toEqual([
+      'certified-fallback',
+      'certified-fallback',
+    ]);
+  });
+
   it('prefers FC values from the foundation plan at matching coordinates', async () => {
     const { buildFoundationPriorityText } = await import('./mergeFoundationPriority');
 

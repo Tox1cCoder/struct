@@ -1,12 +1,8 @@
 import { BoundingBox } from '../types';
 import { pdfjs } from './pdfjsRuntime';
+import { classifyPriorityAnchor, type PdfAnchorKind } from './priorityLabels';
 
-export type PdfAnchorKind =
-  | 'foundation'
-  | 'plan-column'
-  | 'certified-column'
-  | 'x-axis'
-  | 'y-axis';
+export { classifyPriorityAnchor, type PdfAnchorKind };
 
 export interface PdfTextAnchor {
   kind: PdfAnchorKind;
@@ -52,34 +48,6 @@ export const unavailablePdfAnchorInventory = (): PdfAnchorInventory => ({
   foundationLabels: [],
   counts: emptyCounts(),
 });
-
-const canonicalizeCode = (value: string) => value.replace(/['’]/g, '').toUpperCase();
-
-export const classifyPriorityAnchor = (
-  sourceText: string,
-): { kind: PdfAnchorKind; label: string } | null => {
-  const text = sourceText.trim().toUpperCase();
-  if (!text) return null;
-
-  const planColumn = text.match(/^(FC[A-Z0-9]+)/);
-  if (planColumn) return { kind: 'plan-column', label: planColumn[1] };
-
-  const foundation = text.match(/^(F(?:K?\d+[A-Z]?))(?=$|[（(])/);
-  if (foundation) return { kind: 'foundation', label: foundation[1] };
-
-  const xAxis = text.match(/^(X\d+[A-Z]?)$/);
-  if (xAxis) return { kind: 'x-axis', label: xAxis[1] };
-
-  const yAxis = text.match(/^(Y\d+[A-Z]?)$/);
-  if (yAxis) return { kind: 'y-axis', label: yAxis[1] };
-
-  const certified = text.match(/^((?:\d+['’]?)?[CP][A-Z0-9]+):?$/);
-  if (certified) {
-    return { kind: 'certified-column', label: canonicalizeCode(certified[1]) };
-  }
-
-  return null;
-};
 
 const clamp = (value: number) => Math.max(0, Math.min(1000, Math.round(value)));
 

@@ -75,10 +75,61 @@ export interface FoundationFileResult {
   error?: string;
 }
 
+/** Axis-aligned rectangle in PDF display points (y grows downward, page rotation applied). */
+export interface PageRect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export interface PlanGridLine {
+  name: string;
+  /** X position for X lines, Y position for Y lines, in display points. */
+  position: number;
+}
+
+export interface PlanFooting {
+  id: string;
+  label: string;
+  rect: PageRect;
+  fcCode?: string;
+}
+
+/** Deterministic reading of a 基礎伏図 page: named grid lines and labelled footings. */
+export interface FoundationPlanGeometry {
+  page: number;
+  pageWidth: number;
+  pageHeight: number;
+  gridX: PlanGridLine[];
+  gridY: PlanGridLine[];
+  footings: PlanFooting[];
+  unassignedLabels: string[];
+}
+
+export interface CertifiedMarker {
+  id: string;
+  rect: PageRect;
+  fill: [number, number, number];
+  /** Canonical code read from the marker label, or '' when it could not be read. */
+  code: string;
+}
+
+/** Deterministic reading of a 認定柱脚資料 placement page: colour markers and grid lines. */
+export interface CertifiedPlacementMap {
+  page: number;
+  pageWidth: number;
+  pageHeight: number;
+  gridCandidates: { x: number[]; y: number[] };
+  markers: CertifiedMarker[];
+}
+
 export interface CertifiedCoordinateData {
   xAxis: string;
   yAxis: string;
   columnType: string;
+  /** When set, the merge matches on this key instead of the X/Y tokens. */
+  locationKey?: string;
   sourceFileName?: string;
   sourceFileId?: string;
   page?: number;
@@ -90,6 +141,7 @@ export interface CertifiedCoordinateFileResult {
   fileName: string;
   status: ProcessingStatus;
   data: CertifiedCoordinateData[];
+  placementMap?: CertifiedPlacementMap;
   error?: string;
   sourceUrl?: string;
   sourceMimeType?: string;
@@ -102,6 +154,8 @@ export interface FoundationPlanCoordinateData {
   xAxis: string;
   yAxis: string;
   planColumnType: string;
+  /** When set, the merge matches on this key instead of the X/Y tokens. */
+  locationKey?: string;
   isHighlighted?: boolean;
   highlightColor?: string;
   sourceFileName?: string;
@@ -115,6 +169,7 @@ export interface FoundationPlanCoordinateFileResult {
   fileName: string;
   status: ProcessingStatus;
   data: FoundationPlanCoordinateData[];
+  geometry?: FoundationPlanGeometry;
   error?: string;
   sourceUrl?: string;
   sourceMimeType?: string;
