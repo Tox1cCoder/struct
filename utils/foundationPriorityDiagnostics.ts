@@ -101,6 +101,15 @@ export const addPriorityWarning = (
   warning: string,
 ): PriorityPipelineDiagnostics => ({ ...diag, warning });
 
+/** Say why the vector-geometry reader was skipped, ahead of the fallback's own warning. */
+export const withFallbackWarning = (
+  diag: PriorityPipelineDiagnostics,
+  reason: unknown,
+): PriorityPipelineDiagnostics => {
+  const note = `Read with the Gemini fallback: ${reason instanceof Error ? reason.message : String(reason)}`;
+  return { ...diag, warning: diag.warning ? `${note} ${diag.warning}` : note };
+};
+
 export const incrementPriorityCropCount = (
   diag: PriorityPipelineDiagnostics,
   count: number,

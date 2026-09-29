@@ -26,3 +26,13 @@ export const selectPriorityRequestPolicy = (
   thinkingLevel: pass === 'primary' ? ThinkingLevel.MEDIUM : ThinkingLevel.HIGH,
   mediaResolution: PartMediaResolutionLevel.MEDIA_RESOLUTION_MEDIUM,
 });
+
+/**
+ * Reading one short printed code per crisp vector crop needs sharp pixels, not
+ * deliberation: high media resolution, low thinking.
+ */
+export const selectMarkerOcrRequestPolicy = (): GeminiRequestPolicy => ({
+  model: PDF_DOCUMENT_MODEL,
+  thinkingLevel: ThinkingLevel.LOW,
+  mediaResolution: PartMediaResolutionLevel.MEDIA_RESOLUTION_HIGH,
+});

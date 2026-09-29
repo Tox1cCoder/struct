@@ -6,16 +6,35 @@ import {
   extractDataFromPdf,
   extractFoundationPlanCoordinateData,
   extractFrameData,
-  extractJoinedFoundationPriorityPlanData,
 } from '../services/geminiService';
+import {
+  extractCertifiedPlacementMap,
+  extractFoundationPlanGeometry,
+} from '../services/foundationPriorityGeometry';
+import type { PriorityPipelineDiagnostics } from '../types';
 
 vi.mock('../services/geminiService', () => ({
   extractCertifiedCoordinateData: vi.fn(),
   extractDataFromPdf: vi.fn(),
   extractFoundationPlanCoordinateData: vi.fn(),
   extractFrameData: vi.fn(),
-  extractJoinedFoundationPriorityPlanData: vi.fn(),
 }));
+
+vi.mock('../services/foundationPriorityGeometry', () => ({
+  extractCertifiedPlacementMap: vi.fn(),
+  extractFoundationPlanGeometry: vi.fn(),
+}));
+
+const geometryDiagnostics = (role: 'certified' | 'plan'): PriorityPipelineDiagnostics => ({
+  fileName: `${role}.pdf`,
+  role,
+  model: 'vector-geometry',
+  anchorMode: 'native',
+  anchorCounts: { foundation: 0, 'plan-column': 0, 'certified-column': 0, 'x-axis': 0, 'y-axis': 0 },
+  cropCount: 0,
+  stages: { totalMs: 50 },
+  passUsed: 'primary',
+});
 
 describe('App foundation priority tab', () => {
   afterEach(() => {
@@ -51,9 +70,8 @@ describe('App foundation priority tab', () => {
         passUsed: 'primary',
       },
     });
-    vi.mocked(extractJoinedFoundationPriorityPlanData).mockImplementation(
-      (_certified, plan) => extractFoundationPlanCoordinateData(plan),
-    );
+    vi.mocked(extractCertifiedPlacementMap).mockRejectedValue(new Error('no placement page'));
+    vi.mocked(extractFoundationPlanGeometry).mockRejectedValue(new Error('no plan page'));
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
       value: vi.fn(() => 'blob:test'),
@@ -62,6 +80,45 @@ describe('App foundation priority tab', () => {
       configurable: true,
       value: vi.fn(),
     });
+  });
+
+  it('joins plan geometry with a certified placement map uploaded after the plan', async () => {
+    vi.mocked(extractFoundationPlanGeometry).mockResolvedValue({
+      geometry: {
+        page: 1,
+        pageWidth: 842,
+        pageHeight: 595,
+        gridX: [{ name: 'X1', position: 100 }, { name: 'X2', position: 200 }],
+        gridY: [{ name: 'Y2', position: 100 }, { name: 'Y1', position: 200 }],
+        footings: [{ id: 'f0', label: 'F1', rect: { x0: 90, y0: 90, x1: 110, y1: 110 } }],
+        unassignedLabels: [],
+      },
+      diagnostics: geometryDiagnostics('plan'),
+    });
+    vi.mocked(extractCertifiedPlacementMap).mockResolvedValue({
+      placementMap: {
+        page: 1,
+        pageWidth: 1191,
+        pageHeight: 842,
+        gridCandidates: { x: [210, 410], y: [110, 310] },
+        markers: [{ id: 'm0', code: 'C3', fill: [0, 255, 0], rect: { x0: 201, y0: 103, x1: 221, y1: 119 } }],
+      },
+      diagnostics: geometryDiagnostics('certified'),
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getAllByRole('button', { name: /Foundation Priority/i })[0]);
+    fireEvent.change(screen.getByLabelText('Upload Foundation Plan PDFs'), {
+      target: { files: [new File(['plan'], 'phai.pdf', { type: 'application/pdf' })] },
+    });
+    expect(await screen.findByText('1 ok')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Upload Certified Column Base PDFs'), {
+      target: { files: [new File(['certified'], 'trai.pdf', { type: 'application/pdf' })] },
+    });
+
+    expect(await screen.findByLabelText('F1 codes')).toHaveValue('C3');
+    expect(extractCertifiedCoordinateData).not.toHaveBeenCalled();
+    expect(extractFoundationPlanCoordinateData).not.toHaveBeenCalled();
   });
 
   it('shows an explicit empty result after both priority sources finish without resolved mappings', async () => {

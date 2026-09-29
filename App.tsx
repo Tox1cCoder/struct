@@ -18,8 +18,11 @@ import {
   extractDataFromPdf,
   extractFoundationPlanCoordinateData,
   extractFrameData,
-  extractJoinedFoundationPriorityPlanData,
 } from './services/geminiService';
+import {
+  extractCertifiedPlacementMap,
+  extractFoundationPlanGeometry,
+} from './services/foundationPriorityGeometry';
 import {
   BoundingBox,
   CertifiedCoordinateFileResult,
@@ -37,6 +40,8 @@ import {
 } from './types';
 import { getErrorMessage, logError } from './utils/errorHandling';
 import { buildFoundationPriorityText } from './utils/mergeFoundationPriority';
+import { collectPriorityInputs } from './utils/foundationPriorityInputs';
+import { withFallbackWarning } from './utils/foundationPriorityDiagnostics';
 import { hasActiveJobs } from './utils/fileJobs';
 import { StatusStrip } from './components/StatusStrip';
 import { buildColumnWorkingRows } from './utils/columnWorkingRows';
@@ -73,7 +78,6 @@ const App: React.FC = () => {
 
   const [certifiedResults, setCertifiedResults] = useState<CertifiedCoordinateFileResult[]>([]);
   const [foundationPlanResults, setFoundationPlanResults] = useState<FoundationPlanCoordinateFileResult[]>([]);
-  const latestCertifiedPriorityFile = useRef<File | null>(null);
 
   const isReinfProcessing = hasActiveJobs(reinfResults);
   const isFrameProcessing = hasActiveJobs(frameResults);
@@ -238,37 +242,14 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const consolidatedCertifiedData = useMemo(
-    () =>
-      certifiedResults
-        .filter((r) => r.status === 'SUCCESS')
-        .flatMap((r) =>
-          r.data.map((item) => ({
-            ...item,
-            sourceFileName: r.fileName,
-            sourceFileId: r.id,
-          })),
-        ),
-    [certifiedResults],
-  );
-
-  const consolidatedFoundationPlanData = useMemo(
-    () =>
-      foundationPlanResults
-        .filter((r) => r.status === 'SUCCESS')
-        .flatMap((r) =>
-          r.data.map((item) => ({
-            ...item,
-            sourceFileName: r.fileName,
-            sourceFileId: r.id,
-          })),
-        ),
-    [foundationPlanResults],
+  const priorityInputs = useMemo(
+    () => collectPriorityInputs(certifiedResults, foundationPlanResults),
+    [certifiedResults, foundationPlanResults],
   );
 
   const foundationPriorityResult = useMemo(
-    () => buildFoundationPriorityText(consolidatedCertifiedData, consolidatedFoundationPlanData),
-    [consolidatedCertifiedData, consolidatedFoundationPlanData],
+    () => buildFoundationPriorityText(priorityInputs.certifiedRows, priorityInputs.planRows),
+    [priorityInputs],
   );
 
   const [priorityRows, setPriorityRows] = useState<EditableRowsState<FoundationPriorityWorkingRow>>({
@@ -415,9 +396,21 @@ const App: React.FC = () => {
       prev.map((r) => (r.id === id ? { ...r, status: 'PROCESSING' } : r)),
     );
     try {
-      const { data, diagnostics } = await extractCertifiedCoordinateData(file);
+      let update: Partial<CertifiedCoordinateFileResult>;
+      try {
+        const { placementMap, diagnostics } = await extractCertifiedPlacementMap(file);
+        update = { data: [], placementMap, diagnostics };
+      } catch (geometryError) {
+        logError(
+          `Certified geometry unavailable for ${file.name}; using Gemini`,
+          geometryError,
+          { handled: true },
+        );
+        const { data, diagnostics } = await extractCertifiedCoordinateData(file);
+        update = { data, diagnostics: withFallbackWarning(diagnostics, geometryError) };
+      }
       setCertifiedResults((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, status: 'SUCCESS', data, diagnostics } : r)),
+        prev.map((r) => (r.id === id ? { ...r, ...update, status: 'SUCCESS' } : r)),
       );
     } catch (err) {
       logError(`Certified coordinate extraction failed for ${file.name}`, err, { handled: true });
@@ -430,7 +423,6 @@ const App: React.FC = () => {
   const handleCertifiedFilesSelect = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return;
-      latestCertifiedPriorityFile.current = files[files.length - 1];
       const newEntries: CertifiedCoordinateFileResult[] = files.map((file) => ({
         id: Math.random().toString(36).substring(7),
         fileName: file.name,
@@ -452,20 +444,21 @@ const App: React.FC = () => {
       prev.map((r) => (r.id === id ? { ...r, status: 'PROCESSING' } : r)),
     );
     try {
-      let extraction;
-      if (latestCertifiedPriorityFile.current) {
-        try {
-          extraction = await extractJoinedFoundationPriorityPlanData(latestCertifiedPriorityFile.current, file);
-        } catch (joinedError) {
-          logError(`Joint priority extraction failed for ${file.name}; using plan-only fallback`, joinedError, { handled: true });
-          extraction = await extractFoundationPlanCoordinateData(file);
-        }
-      } else {
-        extraction = await extractFoundationPlanCoordinateData(file);
+      let update: Partial<FoundationPlanCoordinateFileResult>;
+      try {
+        const { geometry, diagnostics } = await extractFoundationPlanGeometry(file);
+        update = { data: [], geometry, diagnostics };
+      } catch (geometryError) {
+        logError(
+          `Plan geometry unavailable for ${file.name}; using Gemini`,
+          geometryError,
+          { handled: true },
+        );
+        const { data, diagnostics } = await extractFoundationPlanCoordinateData(file);
+        update = { data, diagnostics: withFallbackWarning(diagnostics, geometryError) };
       }
-      const { data, diagnostics } = extraction;
       setFoundationPlanResults((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, status: 'SUCCESS', data, diagnostics } : r)),
+        prev.map((r) => (r.id === id ? { ...r, ...update, status: 'SUCCESS' } : r)),
       );
     } catch (err) {
       logError(`Foundation plan extraction failed for ${file.name}`, err, { handled: true });
@@ -899,7 +892,9 @@ const App: React.FC = () => {
                         ...r,
                         durationMs: r.diagnostics?.stages.totalMs,
                         passUsed: r.diagnostics?.passUsed,
-                        warning: r.diagnostics?.warning,
+                        warning: [r.diagnostics?.warning, priorityInputs.planWarnings[r.id]]
+                          .filter(Boolean)
+                          .join(' ') || undefined,
                         missingLabels: r.diagnostics?.coverage?.missingLabels,
                       }))}
                       accent="emerald"
@@ -919,10 +914,11 @@ const App: React.FC = () => {
                       onEvidenceSelect={handlePriorityEvidenceSelect}
                     />
                     <InfoBanner accent="cyan">
-                      <strong>Rule:</strong> The app matches both PDFs by canonical X/Y placement tokens for each
-                      support location, such as <code>X1</code> or <code>X1-X2</code>. If 基礎伏図 shows an FC code at
-                      that placement, it wins. Otherwise the app uses the certified C or P code from 認定柱脚資料 at
-                      the same placement.
+                      <strong>Rule:</strong> The app lines up the grids of both PDFs by line order
+                      and spacing, then lists every 認定柱脚資料 column or post marker that falls inside
+                      each 基礎伏図 footing outline. If the footing carries an FC code in 基礎伏図, the FC
+                      code wins. Grid label spelling (for example <code>X2A</code> versus
+                      <code>X2C</code>) is never compared.
                     </InfoBanner>
                   </div>
                 )}

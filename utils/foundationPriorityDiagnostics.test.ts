@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PartMediaResolutionLevel, ThinkingLevel } from '@google/genai';
 import {
   addPriorityWarning,
+  withFallbackWarning,
   createPriorityDiagnostics,
   finishStage,
   incrementPriorityCropCount,
@@ -63,5 +64,17 @@ describe('foundation priority diagnostics', () => {
       usage: { escalated: { promptTokenCount: 100, totalTokenCount: 140 } },
     });
     expect(finished.usage?.escalated).not.toHaveProperty('privateResponse');
+  });
+
+  it('explains why a Gemini fallback ran, ahead of any warning it produced', () => {
+    const base = createPriorityDiagnostics('scan.pdf', 'plan');
+    const reason = new Error('scan.pdf has no page with X/Y grid labels.');
+
+    expect(withFallbackWarning(base, reason).warning).toBe(
+      'Read with the Gemini fallback: scan.pdf has no page with X/Y grid labels.',
+    );
+    expect(withFallbackWarning(addPriorityWarning(base, 'Coverage is incomplete.'), reason).warning).toBe(
+      'Read with the Gemini fallback: scan.pdf has no page with X/Y grid labels. Coverage is incomplete.',
+    );
   });
 });

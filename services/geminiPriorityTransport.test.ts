@@ -14,10 +14,9 @@ const generateContent = vi.fn();
 const filesUpload = vi.fn();
 const filesGet = vi.fn();
 const filesDelete = vi.fn();
-const { extractPriorityPdfAnchors, renderPdfAnchorCrop, renderPdfRegionCrops } = vi.hoisted(() => ({
+const { extractPriorityPdfAnchors, renderPdfAnchorCrop } = vi.hoisted(() => ({
   extractPriorityPdfAnchors: vi.fn(),
   renderPdfAnchorCrop: vi.fn(),
-  renderPdfRegionCrops: vi.fn(),
 }));
 
 vi.mock('@google/genai', () => ({
@@ -35,7 +34,7 @@ vi.mock('@google/genai', () => ({
     MEDIA_RESOLUTION_MEDIUM: 'MEDIA_RESOLUTION_MEDIUM',
     MEDIA_RESOLUTION_HIGH: 'MEDIA_RESOLUTION_HIGH',
   },
-  ThinkingLevel: { HIGH: 'HIGH', MEDIUM: 'MEDIUM' },
+  ThinkingLevel: { HIGH: 'HIGH', MEDIUM: 'MEDIUM', LOW: 'LOW' },
 }));
 
 vi.mock('../utils/pdfTextAnchors', async (importOriginal) => ({
@@ -43,7 +42,7 @@ vi.mock('../utils/pdfTextAnchors', async (importOriginal) => ({
   extractPriorityPdfAnchors,
 }));
 
-vi.mock('../utils/pdfAnchorCrop', () => ({ renderPdfAnchorCrop, renderPdfRegionCrops }));
+vi.mock('../utils/pdfAnchorCrop', () => ({ renderPdfAnchorCrop }));
 
 const CERTIFIED_ROWS = [{ xAxis: 'X1', yAxis: 'Y1', columnType: 'C3009' }];
 
@@ -56,7 +55,7 @@ const fileOfSize = (bytes: number, name = 'doc.pdf') => {
 
 let extractCertifiedCoordinateData: typeof import('./geminiService')['extractCertifiedCoordinateData'];
 let extractFoundationPlanCoordinateData: typeof import('./geminiService')['extractFoundationPlanCoordinateData'];
-let extractJoinedFoundationPriorityPlanData: typeof import('./geminiService')['extractJoinedFoundationPriorityPlanData'];
+let readCertifiedMarkerCodes: typeof import('./geminiService')['readCertifiedMarkerCodes'];
 
 const planRow = (foundation: string, xAxis: string, yAxis: string, planColumnType: string) => ({
   foundation,
@@ -95,36 +94,19 @@ beforeEach(async () => {
   filesDelete.mockReset();
   extractPriorityPdfAnchors.mockReset();
   renderPdfAnchorCrop.mockReset();
-  renderPdfRegionCrops.mockReset();
   generateContent.mockResolvedValue({ text: JSON.stringify(CERTIFIED_ROWS) });
   extractPriorityPdfAnchors.mockResolvedValue(anchoredInventory());
   renderPdfAnchorCrop.mockResolvedValue({ data: 'crop-base64', mimeType: 'image/png' });
-  renderPdfRegionCrops.mockResolvedValue(Array.from({ length: 4 }, (_, index) => ({ data: `region-${index}`, mimeType: 'image/png' })));
   // Re-import per test so the module's cached client picks up the fresh mocks.
   vi.resetModules();
-  ({ extractCertifiedCoordinateData, extractFoundationPlanCoordinateData, extractJoinedFoundationPriorityPlanData } = await import('./geminiService'));
+  ({
+    extractCertifiedCoordinateData,
+    extractFoundationPlanCoordinateData,
+    readCertifiedMarkerCodes,
+  } = await import('./geminiService'));
 });
 
 describe('Foundation Priority coverage orchestration', () => {
-  it('joins paired PDFs through four parallel region requests with FC precedence', async () => {
-    generateContent.mockResolvedValue({ text: JSON.stringify([
-      { foundation: 'F1', codes: ["1'C1"] },
-      { foundation: 'F1A', codes: ['1C4', 'FC1'] },
-      { foundation: 'F2', codes: ['P1'] },
-    ]) });
-
-    const result = await extractJoinedFoundationPriorityPlanData(
-      fileOfSize(2_858_044, 'certified.pdf'),
-      fileOfSize(116_249, 'plan.pdf'),
-    );
-
-    expect(generateContent).toHaveBeenCalledTimes(4);
-    expect(result.data.filter((row) => row.foundation === 'F1A').map((row) => row.planColumnType)).toEqual(['FC1']);
-    expect(result.data.filter((row) => row.foundation === 'F1').map((row) => row.planColumnType)).toEqual(['1C1']);
-    expect(result.diagnostics.cropCount).toBe(8);
-    expect(result.diagnostics.model).toBe('gemini-3.1-pro-preview');
-  });
-
   it('sends the PDF once with a compact anchor manifest', async () => {
     generateContent.mockResolvedValueOnce({ text: JSON.stringify([
       planRow('F1', 'X1', 'Y1', ''),
@@ -271,5 +253,55 @@ describe('Foundation Priority PDF transport', () => {
     expect(diagnostics.stages.uploadMs).toBeTypeOf('number');
     expect(diagnostics.stages.totalMs).toBeTypeOf('number');
     expect(diagnostics.passUsed).toBe('primary');
+  });
+});
+
+describe('Certified marker label reads', () => {
+  const crop = (id: string) => ({ id, data: `png-${id}`, mimeType: 'image/png' as const });
+  const reply = (rows: Array<{ id: string; code: string }>) => ({ text: JSON.stringify(rows) });
+
+  it('sends no request when every marker already has a code', async () => {
+    await expect(readCertifiedMarkerCodes([])).resolves.toEqual(new Map());
+    expect(generateContent).not.toHaveBeenCalled();
+  });
+
+  it('sends one labelled high-resolution image per marker and canonicalizes codes', async () => {
+    generateContent.mockResolvedValueOnce(reply([
+      { id: 'm4', code: "1'C2" },
+      { id: 'm9', code: 'p1' },
+    ]));
+
+    const codes = await readCertifiedMarkerCodes([crop('m4'), crop('m9')]);
+
+    expect(codes).toEqual(new Map([['m4', '1C2'], ['m9', 'P1']]));
+    expect(generateContent).toHaveBeenCalledTimes(1);
+    const { contents, model, config } = generateContent.mock.calls[0][0];
+    expect(model).toBe('gemini-3.1-pro-preview');
+    expect(config.thinkingConfig).toEqual({ thinkingLevel: 'LOW' });
+    expect(contents.filter((part: unknown) => typeof part === 'string' && part.startsWith('Marker ')))
+      .toEqual(['Marker m4:', 'Marker m9:']);
+    expect(contents.filter((part: { inlineData?: unknown }) => part.inlineData)).toEqual([
+      { inlineData: { mimeType: 'image/png', data: 'png-m4' }, mediaResolution: { level: 'MEDIA_RESOLUTION_HIGH' } },
+      { inlineData: { mimeType: 'image/png', data: 'png-m9' }, mediaResolution: { level: 'MEDIA_RESOLUTION_HIGH' } },
+    ]);
+  });
+
+  it('retries once, for only the markers that came back missing or unreadable', async () => {
+    generateContent
+      .mockResolvedValueOnce(reply([
+        { id: 'm1', code: 'C1' },
+        { id: 'm2', code: 'column' },
+        { id: 'm7', code: 'C9' },
+      ]))
+      .mockResolvedValueOnce(reply([{ id: 'm2', code: 'C2' }]));
+
+    const codes = await readCertifiedMarkerCodes([crop('m1'), crop('m2'), crop('m3')]);
+
+    expect(codes).toEqual(new Map([['m1', 'C1'], ['m2', 'C2']]));
+    expect(generateContent).toHaveBeenCalledTimes(2);
+    const retryImages = generateContent.mock.calls[1][0].contents
+      .filter((part: { inlineData?: { data: string } }) => part.inlineData)
+      .map((part: { inlineData: { data: string } }) => part.inlineData.data);
+    expect(retryImages).toEqual(['png-m2', 'png-m3']);
   });
 });

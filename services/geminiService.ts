@@ -3,6 +3,7 @@ import {
   FileState,
   GoogleGenAI,
   PartMediaResolutionLevel,
+  ThinkingLevel,
   Type,
   type PartUnion,
 } from "@google/genai";
@@ -17,7 +18,11 @@ import {
 import { parseBoundingBox, parsePage } from "../utils/boundingBox";
 import { parseTieCount } from "../utils/dataTransform";
 import { normalizeFrameData } from "../utils/frameData";
-import { FRAME_IMAGE_MODEL, selectColumnRequestPolicy } from './geminiRequestPolicy';
+import {
+  FRAME_IMAGE_MODEL,
+  selectColumnRequestPolicy,
+  selectMarkerOcrRequestPolicy,
+} from './geminiRequestPolicy';
 import {
   normalizeCertifiedCoordinateRows,
   normalizeFoundationPlanCoordinateRows,
@@ -28,7 +33,8 @@ import {
   evaluateFoundationPlanCoverage,
   mergePriorityPlanRows,
 } from '../utils/foundationPriorityCoverage';
-import { renderPdfAnchorCrop, renderPdfRegionCrops } from '../utils/pdfAnchorCrop';
+import { renderPdfAnchorCrop } from '../utils/pdfAnchorCrop';
+import { canonicalMarkerCode } from '../utils/priorityLabels';
 import {
   extractPriorityPdfAnchors,
   PdfAnchorInventory,
@@ -1140,107 +1146,83 @@ export const extractFoundationPlanCoordinateData = async (
   return { data: result, diagnostics };
 };
 
-const JOINT_PRIORITY_REGIONS = [
-  { name: 'NW', certified: { ymin: 131, xmin: 193, ymax: 511, xmax: 546 }, plan: { ymin: 109, xmin: 208, ymax: 521, xmax: 523 } },
-  { name: 'NE', certified: { ymin: 131, xmin: 504, ymax: 511, xmax: 848 }, plan: { ymin: 109, xmin: 463, ymax: 521, xmax: 802 } },
-  { name: 'SW', certified: { ymin: 451, xmin: 193, ymax: 843, xmax: 546 }, plan: { ymin: 437, xmin: 208, ymax: 882, xmax: 523 } },
-  { name: 'SE', certified: { ymin: 451, xmin: 504, ymax: 843, xmax: 848 }, plan: { ymin: 437, xmin: 463, ymax: 882, xmax: 802 } },
-] as const;
+export interface MarkerCrop {
+  id: string;
+  data: string;
+  mimeType: 'image/png';
+}
 
-const joinedPriorityResponseSchema = {
+export const CERTIFIED_MARKER_OCR_PROMPT = `
+Each image below is a crop of one coloured highlight marker from a Japanese structural
+column-base placement drawing (認定柱脚資料). Inside the marker there is a column or post
+symbol and a short printed support code such as C1, C12, P1, P2 or 1'C1.
+
+For every marker id, read the support code printed in that crop only.
+- Return the code exactly as printed, keeping any leading number and apostrophe (1'C1).
+- Ignore grid lines, symbols and neighbouring markers cut off at the crop edge.
+- Never infer a code from the marker colour or position. If no code is legible, return an
+  empty string for that id.
+
+Return one object per marker id with the keys id and code.
+`;
+
+const markerCodeResponseSchema = {
   type: 'array',
   items: {
     type: 'object',
     properties: {
-      foundation: { type: 'string' },
-      codes: { type: 'array', items: { type: 'string' } },
+      id: { type: 'string' },
+      code: { type: 'string' },
     },
-    required: ['foundation', 'codes'],
+    required: ['id', 'code'],
     additionalProperties: false,
   },
 };
 
-export const extractJoinedFoundationPriorityPlanData = async (
-  certifiedFile: File,
-  planFile: File,
-): Promise<PriorityExtractionResult<FoundationPlanCoordinateData>> => {
-  const ai = getFoundationPriorityClient();
-  const totalStart = Date.now();
-  let diagnostics = createPriorityDiagnostics(planFile.name, 'plan');
-  const preprocessStart = Date.now();
-  const [anchors, certifiedCrops, planCrops] = await Promise.all([
-    extractPriorityPdfAnchors(planFile),
-    renderPdfRegionCrops(certifiedFile, JOINT_PRIORITY_REGIONS.map((region) => region.certified)),
-    renderPdfRegionCrops(planFile, JOINT_PRIORITY_REGIONS.map((region) => region.plan)),
-  ]);
-  diagnostics = finishStage(diagnostics, 'preprocess', Date.now() - preprocessStart);
-  diagnostics = recordPriorityAnchors(diagnostics, anchors);
-  diagnostics = recordPriorityRequest(diagnostics, 'primary', selectPriorityPass('primary'));
-  diagnostics = incrementPriorityCropCount(diagnostics, certifiedCrops.length + planCrops.length);
-
-  const generationStart = Date.now();
-  const regionResults = await Promise.all(JOINT_PRIORITY_REGIONS.map(async (region, index) => {
-    const targets = [...new Set(anchors.anchors.filter((anchor) => {
-      if (anchor.kind !== 'foundation') return false;
-      const x = (anchor.bbox.xmin + anchor.bbox.xmax) / 2;
-      const y = (anchor.bbox.ymin + anchor.bbox.ymax) / 2;
-      return x >= region.plan.xmin && x <= region.plan.xmax && y >= region.plan.ymin && y <= region.plan.ymax;
-    }).map((anchor) => anchor.label))];
-    const policy = selectPriorityPass('primary');
-    const response = await ai.models.generateContent({
-      model: policy.model,
-      contents: [
-        `CERTIFIED PLAN ${region.name} TILE:`,
-        { inlineData: certifiedCrops[index], mediaResolution: { level: PartMediaResolutionLevel.MEDIA_RESOLUTION_HIGH } },
-        `FOUNDATION PLAN ${region.name} TILE:`,
-        { inlineData: planCrops[index], mediaResolution: { level: PartMediaResolutionLevel.MEDIA_RESOLUTION_HIGH } },
-        `Compare these two images of the same building grid quadrant. Extract only these foundation labels where visibly present: ${targets.join(', ')}.
-For every occurrence of each target foundation, first read its exact printed X-axis and Y-axis placement. Find that exact X/Y placement in the certified-plan image. Match by grid labels and between-grid position, never relative page position. Use a visible FC code in the foundation plan if present; otherwise copy only the certified code at that exact placement.
-The certified legend may use forms like 1'C1 through 1'C6; canonicalize them as 1C1 through 1C6 and never shorten them to C1 through C6. Preserve P1 and P2. Return every distinct code per foundation. Do not borrow a nearby support. Return an empty codes array when the placement is ambiguous.`,
-      ],
-      config: createFoundationPriorityGenerationConfig(joinedPriorityResponseSchema, policy.thinkingLevel),
-    });
-    return parseStructuredArrayResponse(JSON.parse(response.text ?? '[]'));
-  }));
-  diagnostics = finishStage(diagnostics, 'primaryGeneration', Date.now() - generationStart);
-
-  const validateStart = Date.now();
-  const codesByFoundation = new Map<string, Set<string>>();
-  for (const raw of regionResults.flat()) {
-    const record = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : null;
-    const foundation = typeof record?.foundation === 'string' ? record.foundation.trim().toUpperCase() : '';
-    if (!anchors.foundationLabels.includes(foundation)) continue;
-    const codes = codesByFoundation.get(foundation) ?? new Set<string>();
-    if (Array.isArray(record?.codes)) {
-      for (const rawCode of record.codes) {
-        if (typeof rawCode !== 'string') continue;
-        const code = rawCode.replace(/['’\s]/g, '').toUpperCase();
-        if (/^(?:FC[A-Z0-9]+|(?:\d+)?[CP][A-Z0-9]+)$/.test(code)) codes.add(code);
-      }
-    }
-    codesByFoundation.set(foundation, codes);
-  }
-
-  const data = anchors.foundationLabels.flatMap((foundation): FoundationPlanCoordinateData[] => {
-    const rawCodes = [...(codesByFoundation.get(foundation) ?? [])];
-    const fcCodes = rawCodes.filter((code) => code.startsWith('FC'));
-    const codes = fcCodes.length > 0 ? fcCodes : rawCodes;
-    if (codes.length === 0) {
-      return [{ foundation, xAxis: '', yAxis: '', planColumnType: '' }];
-    }
-    return codes.map((planColumnType) => ({ foundation, xAxis: '', yAxis: '', planColumnType }));
+const requestMarkerCodes = async (ai: GoogleGenAI, crops: MarkerCrop[]) => {
+  const policy = selectMarkerOcrRequestPolicy();
+  const level = policy.mediaResolution ?? PartMediaResolutionLevel.MEDIA_RESOLUTION_HIGH;
+  const response = await ai.models.generateContent({
+    model: policy.model,
+    contents: [
+      CERTIFIED_MARKER_OCR_PROMPT,
+      ...crops.flatMap((crop): PartUnion[] => [
+        `Marker ${crop.id}:`,
+        { inlineData: { mimeType: crop.mimeType, data: crop.data }, mediaResolution: { level } },
+      ]),
+    ],
+    config: createFoundationPriorityGenerationConfig(
+      markerCodeResponseSchema,
+      policy.thinkingLevel ?? ThinkingLevel.LOW,
+    ),
   });
-  const coverage = evaluateFoundationPlanCoverage(anchors, data);
-  diagnostics = finishStage(diagnostics, 'primaryValidation', Date.now() - validateStart);
-  diagnostics = recordPriorityCoverage(diagnostics, coverage);
-  if (!coverage.complete) {
-    diagnostics = addPriorityWarning(
-      diagnostics,
-      `Joint PDF coverage is incomplete; unresolved: ${coverage.unresolvedLabels.join(', ')}.`,
-    );
+  const wanted = new Set(crops.map((crop) => crop.id));
+  const codes = new Map<string, string>();
+  for (const raw of parseStructuredArrayResponse(JSON.parse(response.text ?? '[]'))) {
+    const id = typeof raw?.id === 'string' ? raw.id : '';
+    const code = typeof raw?.code === 'string' ? canonicalMarkerCode(raw.code) : null;
+    if (wanted.has(id) && code) codes.set(id, code);
   }
-  diagnostics = finishStage(diagnostics, 'total', Date.now() - totalStart);
-  return { data, diagnostics };
+  return codes;
+};
+
+/**
+ * Read the printed support code of each certified marker crop. Markers that come
+ * back missing or unreadable get one retry on their own; any still unread are left
+ * out of the result so the caller can report them instead of guessing.
+ */
+export const readCertifiedMarkerCodes = async (
+  crops: MarkerCrop[],
+): Promise<Map<string, string>> => {
+  if (crops.length === 0) return new Map();
+  const ai = getFoundationPriorityClient();
+  const codes = await requestMarkerCodes(ai, crops);
+  const unread = crops.filter((crop) => !codes.has(crop.id));
+  if (unread.length > 0) {
+    const retried = await requestMarkerCodes(ai, unread);
+    retried.forEach((code, id) => codes.set(id, code));
+  }
+  return codes;
 };
 
 // Frame extraction prompt (FW and FG types)
