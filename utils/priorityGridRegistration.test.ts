@@ -3,7 +3,7 @@ import type { PageSegment } from './pdfPageGeometry';
 import {
   clusterLinePositions,
   createAxisMapper,
-  registerGridAxis,
+  fitGridAxis,
 } from './priorityGridRegistration';
 
 const vertical = (x: number, y0: number, y1: number): PageSegment =>
@@ -64,32 +64,43 @@ describe('clusterLinePositions', () => {
   });
 });
 
-describe('registerGridAxis', () => {
+describe('fitGridAxis', () => {
   it('fits plan lines onto certified candidates by order and spacing, skipping extra lines', () => {
     const plan = [0, 10, 30, 60];
     const truth = plan.map((value) => 100 + value * 2);
     const candidates = [50, ...truth, 140, 300].sort((a, b) => a - b);
-    expect(registerGridAxis(plan, candidates)).toEqual({ positions: truth, scale: 2 });
+    expect(fitGridAxis(plan, candidates)).toEqual([{ positions: truth, scale: 2, rms: 0 }]);
   });
 
   it('tolerates small drafting offsets between the two drawings', () => {
     const plan = [209.4, 237.9, 288.2, 322.4, 348.3, 411.8, 497.9, 571.1, 641.9];
     const certified = [322.6, 361.8, 431.2, 477.8, 514.3, 602.4, 720.5, 821.2, 919.0];
-    expect(registerGridAxis(plan, [287.3, 292, ...certified])?.positions).toEqual(certified);
+    const [best] = fitGridAxis(plan, [287.3, 292, ...certified]);
+    expect(best.positions).toEqual(certified);
+    expect(best.rms).toBeLessThan(0.5);
   });
 
-  it('returns null when a plan line has no candidate that fits the spacing', () => {
-    expect(registerGridAxis([0, 10, 30, 60], [100, 120, 220])).toBeNull();
+  it('lists every alignment an axis of two lines cannot tell apart', () => {
+    const scales = fitGridAxis([100, 200], [110, 310, 700]).map((fit) => fit.scale).sort();
+    expect(scales).toEqual([2, 3.9, 5.9]);
   });
 
-  it('uses the expected scale to pick among fits an axis of two lines cannot tell apart', () => {
-    expect(registerGridAxis([100, 200], [110, 310, 700])?.positions).toEqual([110, 310]);
-    expect(registerGridAxis([100, 200], [110, 310, 700], 3.9)?.positions).toEqual([310, 700]);
-    expect(registerGridAxis([100, 200], [110, 310, 700], 1)).toBeNull();
+  it('ranks by error in plan units, so a fit at a small scale gains nothing from it', () => {
+    const plan = [0, 10, 20, 30, 40];
+    // Real grid at scale 2 with 0.4 pt drafting noise (0.2 pt in plan units).
+    const grid = [100.4, 119.6, 140.4, 159.6, 180.4];
+    // Ruled table lines at scale 0.2 with 0.1 pt noise (0.5 pt in plan units).
+    const rules = [500.1, 501.9, 504.1, 505.9, 508.1];
+    const [best] = fitGridAxis(plan, [...grid, ...rules]);
+    expect(best.positions).toEqual(grid);
   });
 
-  it('returns null when there are fewer than two plan lines', () => {
-    expect(registerGridAxis([5], [1, 2, 3])).toBeNull();
+  it('returns no fits when a plan line has no candidate that fits the spacing', () => {
+    expect(fitGridAxis([0, 10, 30, 60], [100, 120, 220])).toEqual([]);
+  });
+
+  it('returns no fits when there are fewer than two plan lines', () => {
+    expect(fitGridAxis([5], [1, 2, 3])).toEqual([]);
   });
 });
 

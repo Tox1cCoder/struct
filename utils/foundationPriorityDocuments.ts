@@ -25,9 +25,13 @@ export const readFoundationPlanDocument = (
   return mostOf(usable, (plan) => plan.footings.length);
 };
 
+const hasGridLabels = (map: CertifiedPlacementMap) =>
+  map.gridLabels.x.length >= MIN_GRID_CANDIDATES && map.gridLabels.y.length >= MIN_GRID_CANDIDATES;
+
 /**
- * The 認定柱脚資料 page with the most colour markers, or null when no page has at
- * least three markers and two grid-line candidates on each axis.
+ * The 認定柱脚資料 placement page, or null when no page has at least three markers and
+ * two grid-line candidates on each axis. A page with X/Y grid labels beats one without
+ * (catalog pages carry coloured table cells too); then the most markers wins.
  */
 export const readCertifiedDocument = (
   pages: PdfPageGeometry[],
@@ -38,7 +42,8 @@ export const readCertifiedDocument = (
       map.markers.length >= MIN_MARKERS &&
       map.gridCandidates.x.length >= MIN_GRID_CANDIDATES &&
       map.gridCandidates.y.length >= MIN_GRID_CANDIDATES);
-  return mostOf(usable, (map) => map.markers.length);
+  const labelled = usable.filter(hasGridLabels);
+  return mostOf(labelled.length > 0 ? labelled : usable, (map) => map.markers.length);
 };
 
 export const applyMarkerCodes = (

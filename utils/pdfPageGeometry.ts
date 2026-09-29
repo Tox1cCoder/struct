@@ -92,20 +92,29 @@ const samePoint = (a: Point, b: Point) =>
 const isAxisAligned = (a: Point, b: Point) =>
   Math.abs(a[0] - b[0]) < AXIS_TOLERANCE || Math.abs(a[1] - b[1]) < AXIS_TOLERANCE;
 
+const isClosedLoop = (subpath: Subpath, treatAsClosed: boolean) =>
+  treatAsClosed ||
+  subpath.closed ||
+  samePoint(subpath.points[0], subpath.points[subpath.points.length - 1]);
+
+/** Distinct corners of a closed subpath, without a repeated closing point. */
+const cornersOf = (points: Point[]) => {
+  const corners = points.filter((point, index) =>
+    index === 0 || !samePoint(point, points[index - 1]));
+  const repeatsStart = corners.length > 1 && samePoint(corners[0], corners[corners.length - 1]);
+  return repeatsStart ? corners.slice(0, -1) : corners;
+};
+
+const hasAxisAlignedEdges = (corners: Point[]) =>
+  corners.every((corner, index) => isAxisAligned(corner, corners[(index + 1) % corners.length]));
+
 /** Corners of an axis-aligned rectangle subpath, or null when the subpath is anything else. */
 const rectangleOf = (subpath: Subpath, treatAsClosed: boolean): PageRect | null => {
-  const loopsBack = samePoint(subpath.points[0], subpath.points[subpath.points.length - 1]);
-  if (!treatAsClosed && !subpath.closed && !loopsBack) return null;
-  if (subpath.straight.some((straight) => !straight)) return null;
-  const corners = subpath.points.filter(
-    (point, index, all) => index === 0 || !samePoint(point, all[index - 1]),
-  );
-  if (corners.length === 5 && samePoint(corners[0], corners[4])) corners.pop();
-  if (corners.length !== 4) return null;
-  const closedLoop = [...corners, corners[0]];
-  for (let index = 1; index < closedLoop.length; index += 1) {
-    if (!isAxisAligned(closedLoop[index - 1], closedLoop[index])) return null;
+  if (!isClosedLoop(subpath, treatAsClosed) || subpath.straight.some((straight) => !straight)) {
+    return null;
   }
+  const corners = cornersOf(subpath.points);
+  if (corners.length !== 4 || !hasAxisAlignedEdges(corners)) return null;
   const rect = bounds(corners);
   const degenerate = rect.x1 - rect.x0 < AXIS_TOLERANCE || rect.y1 - rect.y0 < AXIS_TOLERANCE;
   return degenerate ? null : rect;
@@ -178,6 +187,11 @@ class GeometryWalker {
     endAnnotation: () => this.pop(),
     setLineWidth: (args) => {
       this.state.lineWidth = Number(args?.[0] ?? 1);
+    },
+    setGState: (args) => {
+      const entries = (args?.[0] ?? []) as Array<[string, unknown]>;
+      const lineWidth = entries.find(([key]) => key === 'LW')?.[1];
+      if (typeof lineWidth === 'number') this.state.lineWidth = lineWidth;
     },
     setFillRGBColor: (args) => {
       this.state.fill = Array.from((args ?? [0, 0, 0]) as ArrayLike<number>).slice(0, 3) as Rgb;

@@ -22,6 +22,7 @@ import {
 import {
   extractCertifiedPlacementMap,
   extractFoundationPlanGeometry,
+  PriorityGeometryUnavailableError,
 } from './services/foundationPriorityGeometry';
 import {
   BoundingBox,
@@ -401,10 +402,11 @@ const App: React.FC = () => {
         const { placementMap, diagnostics } = await extractCertifiedPlacementMap(file);
         update = { data: [], placementMap, diagnostics };
       } catch (geometryError) {
+        // A PDF without usable geometry is expected; any other failure is a bug worth logging.
         logError(
           `Certified geometry unavailable for ${file.name}; using Gemini`,
           geometryError,
-          { handled: true },
+          { handled: geometryError instanceof PriorityGeometryUnavailableError },
         );
         const { data, diagnostics } = await extractCertifiedCoordinateData(file);
         update = { data, diagnostics: withFallbackWarning(diagnostics, geometryError) };
@@ -452,7 +454,7 @@ const App: React.FC = () => {
         logError(
           `Plan geometry unavailable for ${file.name}; using Gemini`,
           geometryError,
-          { handled: true },
+          { handled: geometryError instanceof PriorityGeometryUnavailableError },
         );
         const { data, diagnostics } = await extractFoundationPlanCoordinateData(file);
         update = { data, diagnostics: withFallbackWarning(diagnostics, geometryError) };

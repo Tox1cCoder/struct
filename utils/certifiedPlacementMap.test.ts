@@ -38,7 +38,7 @@ describe('buildCertifiedPlacementMap', () => {
     expect(map).toMatchObject({ page: 1, pageWidth: 1191, pageHeight: 842 });
   });
 
-  it('keeps coloured marker fills inside the grid area and skips black, legend and duplicates', () => {
+  it('keeps coloured fills inside the grid area, skipping black, legend and duplicates', () => {
     const marker = { x0: 313, y0: 204, x1: 333, y1: 221 };
     const map = buildCertifiedPlacementMap(
       page([

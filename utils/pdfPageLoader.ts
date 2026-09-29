@@ -17,6 +17,8 @@ const withPdfDocument = async <T>(file: File, work: (document: PdfDocument) => P
   try {
     return await work(document);
   } finally {
+    // Releasing the worker-side document can fail after the page data is already read;
+    // that must not replace the result or the original error.
     await document.destroy().catch(() => undefined);
   }
 };

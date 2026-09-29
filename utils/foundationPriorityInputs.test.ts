@@ -23,6 +23,7 @@ const geometry: FoundationPlanGeometry = {
     { id: 'f1', label: 'F2', rect: { x0: 190, y0: 190, x1: 210, y1: 210 } },
   ],
   unassignedLabels: [],
+  unlabelledFootings: [],
 };
 
 const placementMap = (code: string): CertifiedPlacementMap => ({
@@ -30,6 +31,7 @@ const placementMap = (code: string): CertifiedPlacementMap => ({
   pageWidth: 1191,
   pageHeight: 842,
   gridCandidates: { x: [210, 410, 610], y: [110, 310] },
+  gridLabels: { x: [], y: [] },
   markers: [
     { id: 'm0', code, fill: [0, 255, 0], rect: { x0: 201, y0: 103, x1: 221, y1: 119 } },
   ],
@@ -46,6 +48,10 @@ const planResult = (
   extra: Partial<FoundationPlanCoordinateFileResult>,
 ): FoundationPlanCoordinateFileResult =>
   ({ id, fileName: `${id}.pdf`, status: 'SUCCESS', data: [], ...extra });
+
+const geminiPlan = planResult('plan', {
+  data: [{ foundation: 'F1', xAxis: 'X1', yAxis: 'Y2', planColumnType: '' }],
+});
 
 const linesOf = (inputs: ReturnType<typeof collectPriorityInputs>) =>
   buildFoundationPriorityText(inputs.certifiedRows, inputs.planRows).lines;
@@ -86,6 +92,33 @@ describe('collectPriorityInputs', () => {
 
     expect(linesOf(inputs)).toEqual(['F1: C3009']);
     expect(inputs.planWarnings).toEqual({});
+  });
+
+  it('matches Gemini plan rows to a placement map by its printed grid labels', () => {
+    const labelled: CertifiedPlacementMap = {
+      ...placementMap('C3'),
+      gridLabels: {
+        x: [{ name: 'X1', position: 210 }, { name: 'X2', position: 410 }],
+        y: [{ name: 'Y2', position: 110 }, { name: 'Y1', position: 310 }],
+      },
+    };
+    const inputs = collectPriorityInputs(
+      [certifiedResult('cert', { placementMap: labelled })],
+      [geminiPlan],
+    );
+
+    expect(linesOf(inputs)).toEqual(['F1: C3']);
+    expect(inputs.planWarnings.plan).toMatch(/printed grid labels only/);
+  });
+
+  it('warns that certified codes cannot be matched when the map has no grid labels', () => {
+    const inputs = collectPriorityInputs(
+      [certifiedResult('cert', { placementMap: placementMap('C3') })],
+      [geminiPlan],
+    );
+
+    expect(linesOf(inputs)).toEqual([]);
+    expect(inputs.planWarnings.plan).toMatch(/cannot be matched/);
   });
 
   it('passes Gemini plan rows through unchanged and skips unfinished results', () => {

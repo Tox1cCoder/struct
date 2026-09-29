@@ -91,7 +91,8 @@ describe('Foundation Priority on Left.pdf (認定柱脚資料) and Right.pdf (�
     const labelled = embedded.markers.filter((marker) => marker.code);
     expect(labelled.length).toBe(73);
     for (const marker of labelled) {
-      expect({ id: marker.id, code: marker.code }).toEqual({ id: marker.id, code: verifiedRead(marker) });
+      const expected = { id: marker.id, code: verifiedRead(marker) };
+      expect({ id: marker.id, code: marker.code }).toEqual(expected);
     }
   });
 
@@ -112,8 +113,13 @@ describe('Foundation Priority on Left.pdf (認定柱脚資料) and Right.pdf (�
     const join = joinFoundationPriorityGeometry(plan, certified, 'left');
     const result = buildFoundationPriorityText(join.certifiedRows, join.planRows);
 
-    expect(join.warnings).toEqual([]);
-    expect(result.rows.map((row) => row.foundation).sort()).toEqual([...EXPECTED_FOUNDATION_LABELS].sort());
+    // The P1 post in F6 maps 0.32 pt inside the footing edge (its marker box centre sits
+    // right of the post symbol); the join flags it rather than silently deciding.
+    expect(join.warnings).toEqual([
+      '1 certified marker(s) sit within 1 pt of a footing edge (F6); check their evidence.',
+    ]);
+    const foundations = result.rows.map((row) => row.foundation).sort();
+    expect(foundations).toEqual([...EXPECTED_FOUNDATION_LABELS].sort());
     expect(
       result.rows.map((row) => ({
         foundation: row.foundation,
@@ -129,7 +135,8 @@ describe('Foundation Priority on Left.pdf (認定柱脚資料) and Right.pdf (�
       join.planRows
         .filter((row) => row.foundation === foundation)
         .map((row) => {
-          const certifiedRow = join.certifiedRows.find((entry) => entry.locationKey === row.locationKey);
+          const certifiedRow = join.certifiedRows
+            .find((entry) => entry.locationKey === row.locationKey);
           return `${row.xAxis}/${row.yAxis}=${certifiedRow?.columnType}`;
         })
         .sort();

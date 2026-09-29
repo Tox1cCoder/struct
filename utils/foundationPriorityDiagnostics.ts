@@ -106,7 +106,8 @@ export const withFallbackWarning = (
   diag: PriorityPipelineDiagnostics,
   reason: unknown,
 ): PriorityPipelineDiagnostics => {
-  const note = `Read with the Gemini fallback: ${reason instanceof Error ? reason.message : String(reason)}`;
+  const why = reason instanceof Error ? reason.message : String(reason);
+  const note = `Read with the Gemini fallback: ${why}`;
   return { ...diag, warning: diag.warning ? `${note} ${diag.warning}` : note };
 };
 

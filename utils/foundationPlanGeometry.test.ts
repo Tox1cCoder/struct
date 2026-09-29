@@ -53,6 +53,24 @@ describe('buildFoundationPlanGeometry', () => {
     ]);
   });
 
+  it('ignores a key plan that repeats grid labels at other positions', () => {
+    const names = ['X1', 'X2', 'X3', 'X4', 'X5'];
+    const mainRow = names.map((name, index) => text(name, 98 + index * 100, 500));
+    const keyPlan = names.map((name, index) => text(name, 698 + index * 20, 60));
+    const geometry = buildFoundationPlanGeometry(page({ texts: [...mainRow, ...keyPlan] }), 1);
+
+    expect(geometry.gridX.map((line) => line.position)).toEqual([100, 200, 300, 400, 500]);
+  });
+
+  it('merges grid labels drawn in both a top and a bottom row', () => {
+    const bottom = ['X1', 'X2', 'X3'].map((name, index) => text(name, 98 + index * 100, 500));
+    const top = [text('X1', 98.5, 40), text('X2', 197.5, 40), text('X2A', 248, 40)];
+    const geometry = buildFoundationPlanGeometry(page({ texts: [...bottom, ...top] }), 1);
+
+    expect(geometry.gridX.map((line) => line.name)).toEqual(['X1', 'X2', 'X2A', 'X3']);
+    expect(geometry.gridX.find((line) => line.name === 'X2A')?.position).toBe(250);
+  });
+
   it('assigns each F label its own footing, giving a leader-offset label the remaining box', () => {
     const geometry = buildFoundationPlanGeometry(
       page({
@@ -60,7 +78,7 @@ describe('buildFoundationPlanGeometry', () => {
           ...gridTexts,
           text('F1', 88, 286),
           text('F4', 158, 286),
-          text('F9A(設計GL-1,500)', 150, 270, 26),
+          text('F9A(設計GL-1,500)', 172, 280, 26),
         ],
         rects: [
           box({ x0: 90, y0: 290, x1: 110, y1: 310 }),
@@ -104,6 +122,54 @@ describe('buildFoundationPlanGeometry', () => {
     ]);
   });
 
+  it('does not let a distant stray label claim an unlabelled footing', () => {
+    const geometry = buildFoundationPlanGeometry(
+      page({
+        texts: [...gridTexts, text('F1', 88, 286), text('F9', 190, 395)],
+        rects: [
+          box({ x0: 90, y0: 290, x1: 110, y1: 310 }),
+          box({ x0: 190, y0: 290, x1: 210, y1: 310 }),
+        ],
+      }),
+      1,
+    );
+
+    expect(geometry.footings.map((footing) => footing.label)).toEqual(['F1']);
+    expect(geometry.unassignedLabels).toEqual(['F9']);
+    expect(geometry.unlabelledFootings).toEqual([{ x0: 190, y0: 290, x1: 210, y1: 310 }]);
+  });
+
+  it('counts a label once when it is both native text and an SHX annotation', () => {
+    const geometry = buildFoundationPlanGeometry(
+      page({
+        texts: [...gridTexts, text('F1', 88, 286), text('F1', 88.2, 286.1)],
+        rects: [
+          box({ x0: 90, y0: 290, x1: 110, y1: 310 }),
+          box({ x0: 112, y0: 290, x1: 122, y1: 300 }),
+        ],
+      }),
+      1,
+    );
+
+    expect(geometry.footings.map((footing) => footing.rect.x0)).toEqual([90]);
+    expect(geometry.unlabelledFootings).toEqual([{ x0: 112, y0: 290, x1: 122, y1: 300 }]);
+  });
+
+  it('does not report pedestal squares nested inside a labelled footing as unlabelled', () => {
+    const geometry = buildFoundationPlanGeometry(
+      page({
+        texts: [...gridTexts, text('F1A', 88, 286)],
+        rects: [
+          box({ x0: 90, y0: 290, x1: 110, y1: 310 }),
+          box({ x0: 97, y0: 297, x1: 103, y1: 303 }),
+        ],
+      }),
+      1,
+    );
+
+    expect(geometry.unlabelledFootings).toEqual([]);
+  });
+
   it('reports labels that have no footing nearby', () => {
     const geometry = buildFoundationPlanGeometry(
       page({
@@ -117,12 +183,26 @@ describe('buildFoundationPlanGeometry', () => {
     expect(geometry.unassignedLabels).toEqual(['F2']);
   });
 
-  it('ignores filled rectangles and page-sized frames when looking for footings', () => {
+  it('accepts a footing drawn with a white mask fill', () => {
     const geometry = buildFoundationPlanGeometry(
       page({
         texts: [...gridTexts, text('F1', 88, 286)],
         rects: [
-          { ...box({ x0: 90, y0: 290, x1: 110, y1: 310 }), filled: true },
+          { ...box({ x0: 90, y0: 290, x1: 110, y1: 310 }), filled: true, fill: [255, 255, 255] },
+        ],
+      }),
+      1,
+    );
+
+    expect(geometry.footings.map((footing) => footing.label)).toEqual(['F1']);
+  });
+
+  it('ignores coloured fills and page-sized frames when looking for footings', () => {
+    const geometry = buildFoundationPlanGeometry(
+      page({
+        texts: [...gridTexts, text('F1', 88, 286)],
+        rects: [
+          { ...box({ x0: 90, y0: 290, x1: 110, y1: 310 }), filled: true, fill: [0, 255, 0] },
           box({ x0: 10, y0: 10, x1: 790, y1: 590 }),
         ],
       }),

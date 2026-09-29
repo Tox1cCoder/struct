@@ -1,5 +1,6 @@
 import type { CertifiedMarker, CertifiedPlacementMap, PageRect } from '../types';
 import type { PageShapeRect, PageText, PdfPageGeometry, Rgb } from './pdfPageGeometry';
+import { readGridLabels } from './foundationPlanGeometry';
 import { clusterLinePositions } from './priorityGridRegistration';
 import { canonicalMarkerCode } from './priorityLabels';
 
@@ -86,6 +87,7 @@ export const buildCertifiedPlacementMap = (
     pageWidth: geometry.width,
     pageHeight: geometry.height,
     gridCandidates: { x, y },
+    gridLabels: readGridLabels(geometry.texts),
     markers: collectMarkers(geometry, x, y),
   };
 };

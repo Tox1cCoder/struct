@@ -68,9 +68,10 @@ The "10/13" and "11/13" accuracy figures recorded for the Gemini quadrant pipeli
 | Step | Time | Result |
 | --- | --- | --- |
 | Upload `Right.pdf` (plan) first | 0.3 s | 44 footings, no model call |
-| Then upload `Left.pdf` (certified) | 4.9 s | 76 markers, 1 Gemini request for 3 crops |
+| Then upload `Left.pdf` (certified) | 4.4–4.9 s | 76 markers, 1 Gemini request for 3 crops |
 | Rows shown | — | All 15 match the table above |
 | Evidence viewer | — | Plan and certified highlights land on the F8 footing and its C3 marker |
+| Warning shown | — | "1 certified marker(s) sit within 1 pt of a footing edge (F6); check their evidence." |
 
 The old pipeline took about 120 s per plan upload and returned different rows between runs.
 
@@ -84,13 +85,13 @@ The same live check sent all 76 marker crops (not just the 3 unlabelled ones) to
 
 - `utils/foundationPriorityGolden.test.ts` runs the real PDFs through pdfjs in Node, with OCR stubbed from the verified reads. It asserts:
   - the table above
-  - zero join warnings
+  - exactly one join warning: the F6 P1 post maps 0.32 pt inside the footing edge because post markers are anchored at their box centre
   - grid tokens for F7/F8/F1B/F2A
   - certified evidence on every certified-fallback location
   - that embedded labels agree with the visual reads
   - that only the three C2 markers need OCR
 - Mutation checks: changing one verified read, or disabling grid-line snapping, makes the golden test fail.
-- `npx vitest run`: 44 files, 307 tests pass. `npx tsc --noEmit` and `npm run build` are clean.
+- `npx vitest run`: 44 files, 326 tests pass. `npx tsc --noEmit` and `npm run build` are clean.
 
 ## Re-running the browser check
 

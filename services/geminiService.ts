@@ -1179,6 +1179,17 @@ const markerCodeResponseSchema = {
   },
 };
 
+/** Codes the model returned for requested ids, canonicalized; anything else is dropped. */
+const parseMarkerCodes = (text: string, wanted: Set<string>) => {
+  const codes = new Map<string, string>();
+  for (const raw of parseStructuredArrayResponse(JSON.parse(text))) {
+    const id = typeof raw?.id === 'string' ? raw.id : '';
+    const code = typeof raw?.code === 'string' ? canonicalMarkerCode(raw.code) : null;
+    if (wanted.has(id) && code) codes.set(id, code);
+  }
+  return codes;
+};
+
 const requestMarkerCodes = async (ai: GoogleGenAI, crops: MarkerCrop[]) => {
   const policy = selectMarkerOcrRequestPolicy();
   const level = policy.mediaResolution ?? PartMediaResolutionLevel.MEDIA_RESOLUTION_HIGH;
@@ -1196,14 +1207,7 @@ const requestMarkerCodes = async (ai: GoogleGenAI, crops: MarkerCrop[]) => {
       policy.thinkingLevel ?? ThinkingLevel.LOW,
     ),
   });
-  const wanted = new Set(crops.map((crop) => crop.id));
-  const codes = new Map<string, string>();
-  for (const raw of parseStructuredArrayResponse(JSON.parse(response.text ?? '[]'))) {
-    const id = typeof raw?.id === 'string' ? raw.id : '';
-    const code = typeof raw?.code === 'string' ? canonicalMarkerCode(raw.code) : null;
-    if (wanted.has(id) && code) codes.set(id, code);
-  }
-  return codes;
+  return parseMarkerCodes(response.text ?? '[]', new Set(crops.map((crop) => crop.id)));
 };
 
 /**
@@ -1218,9 +1222,17 @@ export const readCertifiedMarkerCodes = async (
   const ai = getFoundationPriorityClient();
   const codes = await requestMarkerCodes(ai, crops);
   const unread = crops.filter((crop) => !codes.has(crop.id));
-  if (unread.length > 0) {
+  if (unread.length === 0) return codes;
+  try {
     const retried = await requestMarkerCodes(ai, unread);
     retried.forEach((code, id) => codes.set(id, code));
+  } catch (error) {
+    // The first pass already holds good reads; the caller reports the rest as unread.
+    logError(
+      `Retrying ${unread.length} certified marker label read(s) failed`,
+      error,
+      { handled: true },
+    );
   }
   return codes;
 };

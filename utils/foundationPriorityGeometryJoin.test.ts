@@ -36,6 +36,7 @@ const plan = (footings: PlanFooting[]): FoundationPlanGeometry => ({
   ],
   footings,
   unassignedLabels: [],
+  unlabelledFootings: [],
 });
 
 /** Certified sheet = plan × 2, shifted by (+10, -90), with extra non-grid lines. */
@@ -47,6 +48,7 @@ const certified = (
   pageWidth: 1191,
   pageHeight: 842,
   gridCandidates: { x, y: [110, 310, 700] },
+  gridLabels: { x: [], y: [] },
   markers,
 });
 
@@ -149,6 +151,28 @@ describe('joinFoundationPriorityGeometry', () => {
     expect(result.warnings[0]).toMatch(/X grid lines .* could not be matched/);
   });
 
+  it('warns about markers that land within a point of a footing edge', () => {
+    const edge = plan([footing('fB', 'F4', rect(150.5, 97, 156, 103))]);
+    const markers = [postMarker('m1', 'P1', 310, 110)];
+    const result = joinFoundationPriorityGeometry(edge, certified(markers), 'c1');
+
+    expect(result.warnings).toContain(
+      '1 certified marker(s) sit within 1 pt of a footing edge (F4); check their evidence.',
+    );
+  });
+
+  it('warns when column markers fall inside footing outlines that have no F label', () => {
+    const result = joinFoundationPriorityGeometry(
+      { ...plan(sampleFootings), unlabelledFootings: [rect(245, 95, 255, 105)] },
+      certified(sampleMarkers),
+      'c1',
+    );
+
+    expect(result.warnings).toContain(
+      '1 certified column marker(s) sit inside footing outlines with no F label.',
+    );
+  });
+
   it('names the foundations whose marker labels could not be read', () => {
     const result = joinSample(
       sampleMarkers.map((marker) => (marker.id === 'm3' ? { ...marker, code: '' } : marker)),
@@ -156,6 +180,66 @@ describe('joinFoundationPriorityGeometry', () => {
 
     expect(linesOf(result)).toContain('F7: C1');
     expect(result.warnings).toContain('Could not read 1 certified marker label(s) in: F7.');
+  });
+});
+
+describe('joinFoundationPriorityGeometry grid alignment', () => {
+  const uniformPlan = (names: string[]): FoundationPlanGeometry => ({
+    ...plan([footing('fA', 'F1', rect(95, 95, 105, 105))]),
+    gridX: names.map((name, index) => ({ name, position: 100 + index * 100 })),
+  });
+  // Certified bays of 200 pt: five X lines, one more than the plan reads.
+  const uniformCertified = (withLabels: boolean): CertifiedPlacementMap => ({
+    ...certified([columnMarker('m0', 'C3', 410, 110), columnMarker('m1', 'C1', 210, 110)]),
+    gridCandidates: { x: [210, 410, 610, 810, 1010], y: [110, 310] },
+    gridLabels: {
+      x: withLabels
+        ? ['X1', 'X2', 'X3', 'X4', 'X5'].map((name, index) =>
+          ({ name, position: 210 + index * 200 }))
+        : [],
+      y: [],
+    },
+  });
+
+  it('refuses to guess between alignments that fit equally well', () => {
+    const result = joinFoundationPriorityGeometry(
+      uniformPlan(['X2', 'X3', 'X4', 'X5']),
+      uniformCertified(false),
+      'c1',
+    );
+
+    expect(linesOf(result)).toEqual([]);
+    expect(result.warnings[0]).toMatch(/more than one way/);
+  });
+
+  it('lets the certified sheet grid labels pick the alignment', () => {
+    const result = joinFoundationPriorityGeometry(
+      uniformPlan(['X2', 'X3', 'X4', 'X5']),
+      uniformCertified(true),
+      'c1',
+    );
+
+    expect(linesOf(result)).toEqual(['F1: C3']);
+  });
+
+  it('rejects a fit onto ruled table lines drawn at another scale', () => {
+    const fivePlan: FoundationPlanGeometry = {
+      ...plan([footing('fA', 'F1', rect(95, 195, 105, 205))]),
+      gridY: [0, 1, 2, 3, 4].map((index) =>
+        ({ name: `Y${5 - index}`, position: 100 + index * 50 })),
+    };
+    // Real Y grid at scale 2 with drafting noise, plus exact title-block rules 10 pt apart.
+    const tableCertified: CertifiedPlacementMap = {
+      ...certified([columnMarker('m0', 'C5', 210, 310)]),
+      gridCandidates: {
+        x: [210, 410, 610],
+        y: [110.4, 209.6, 310.4, 409.6, 510.4, 768.5, 778.5, 788.5, 798.5, 808.5],
+      },
+    };
+
+    const result = joinFoundationPriorityGeometry(fivePlan, tableCertified, 'c1');
+
+    expect(linesOf(result)).toEqual(['F1: C5']);
   });
 });
 

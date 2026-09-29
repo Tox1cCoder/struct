@@ -9,7 +9,7 @@ import type {
   PlanFooting,
   PlanGridLine,
 } from '../types';
-import { createAxisMapper, registerGridAxis } from './priorityGridRegistration';
+import { alignGrids, type GridAlignment } from './priorityGridAlignment';
 
 export interface PriorityGeometryJoinResult {
   certifiedRows: CertifiedCoordinateData[];
@@ -19,6 +19,7 @@ export interface PriorityGeometryJoinResult {
 
 const ON_LINE_TOLERANCE = 1;
 const CONTAIN_TOLERANCE = 0.5;
+const NEAR_EDGE = 1;
 
 const clampPermille = (value: number) => Math.max(0, Math.min(1000, Math.round(value)));
 
@@ -70,50 +71,11 @@ export const planLocatorRows = (plan: FoundationPlanGeometry): FoundationPlanCoo
     ? plan.footings.flatMap((footing) => locatorRowsFor(plan, footing))
     : [];
 
-interface Registration {
-  certX: number[];
-  certY: number[];
-  toPlanX: (value: number) => number;
-  toPlanY: (value: number) => number;
-}
-
-const registrationFailure = (axis: 'X' | 'Y', lines: PlanGridLine[]) =>
-  `${axis} grid lines of the 基礎伏図 (${lines.map((line) => line.name).join(', ')}) ` +
-  'could not be matched to the 認定柱脚資料 grid; only FC codes are shown.';
-
-/** Register the axis with more lines first, then hold the other axis to its scale. */
-const registerGrids = (
-  plan: FoundationPlanGeometry,
-  certified: CertifiedPlacementMap,
-): Registration | string => {
-  const axes = [
-    { axis: 'X' as const, lines: plan.gridX, candidates: certified.gridCandidates.x },
-    { axis: 'Y' as const, lines: plan.gridY, candidates: certified.gridCandidates.y },
-  ];
-  if (plan.gridY.length > plan.gridX.length) axes.reverse();
-  const first = registerGridAxis(axes[0].lines.map((line) => line.position), axes[0].candidates);
-  if (!first) return registrationFailure(axes[0].axis, axes[0].lines);
-  const second = registerGridAxis(
-    axes[1].lines.map((line) => line.position),
-    axes[1].candidates,
-    first.scale,
-  );
-  if (!second) return registrationFailure(axes[1].axis, axes[1].lines);
-  const [certX, certY] = axes[0].axis === 'X'
-    ? [first.positions, second.positions]
-    : [second.positions, first.positions];
-  return {
-    certX,
-    certY,
-    toPlanX: createAxisMapper(certX, plan.gridX.map((line) => line.position)),
-    toPlanY: createAxisMapper(certY, plan.gridY.map((line) => line.position)),
-  };
-};
-
 /**
  * A marker box surrounds its column symbol and label. Columns sit on grid lines,
  * so snap to a line crossing the box (the one nearest the box centre when several
- * do); a post between lines keeps the box centre.
+ * do). A post between lines keeps the box centre, which can sit a couple of points
+ * off the post itself; `nearEdgeWarning` flags the placements that this can flip.
  */
 const snapAxis = (from: number, to: number, lines: number[]) => {
   const centre = (from + to) / 2;
@@ -145,21 +107,59 @@ interface Placement {
   yAxis: string;
 }
 
-const placeMarkers = (
-  plan: FoundationPlanGeometry,
+interface MappedMarker {
+  marker: CertifiedMarker;
+  x: number;
+  y: number;
+}
+
+/** Each marker inside the registered grid, at its column position in plan space. */
+const mapMarkers = (
   certified: CertifiedPlacementMap,
-  registration: Registration,
-): Placement[] =>
+  registration: GridAlignment,
+): MappedMarker[] =>
   certified.markers.flatMap((marker) => {
-    const certX = snapAxis(marker.rect.x0, marker.rect.x1, registration.certX);
-    const certY = snapAxis(marker.rect.y0, marker.rect.y1, registration.certY);
+    const { rect } = marker;
+    const certX = snapAxis(rect.x0, rect.x1, registration.certX);
+    const certY = snapAxis(rect.y0, rect.y1, registration.certY);
     if (!insideGrid(certX, registration.certX) || !insideGrid(certY, registration.certY)) return [];
-    const x = registration.toPlanX(certX);
-    const y = registration.toPlanY(certY);
-    const footing = containingFooting(plan.footings, x, y);
-    if (!footing) return [];
-    return [{ marker, footing, xAxis: axisToken(x, plan.gridX), yAxis: axisToken(y, plan.gridY) }];
+    return [{ marker, x: registration.toPlanX(certX), y: registration.toPlanY(certY) }];
   });
+
+const placementOf = (plan: FoundationPlanGeometry, { marker, x, y }: MappedMarker) => {
+  const footing = containingFooting(plan.footings, x, y);
+  return footing
+    ? [{ marker, footing, xAxis: axisToken(x, plan.gridX), yAxis: axisToken(y, plan.gridY) }]
+    : [];
+};
+
+const edgeDistance = ({ x0, y0, x1, y1 }: PageRect, x: number, y: number) => {
+  const inside = x >= x0 && x <= x1 && y >= y0 && y <= y1;
+  if (inside) return Math.min(x - x0, x1 - x, y - y0, y1 - y);
+  return Math.hypot(Math.max(x0 - x, 0, x - x1), Math.max(y0 - y, 0, y - y1));
+};
+
+/** A marker this close to a footing edge could belong on either side of it. */
+const nearEdgeWarning = (plan: FoundationPlanGeometry, mapped: MappedMarker[]) => {
+  const near = mapped.flatMap(({ x, y }) =>
+    plan.footings.filter((footing) => edgeDistance(footing.rect, x, y) < NEAR_EDGE));
+  if (near.length === 0) return [];
+  const labels = [...new Set(near.map((footing) => footing.label))].join(', ');
+  return [
+    `${near.length} certified marker(s) sit within ${NEAR_EDGE} pt of a footing edge ` +
+      `(${labels}); check their evidence.`,
+  ];
+};
+
+const unlabelledWarning = (plan: FoundationPlanGeometry, mapped: MappedMarker[]) => {
+  const inside = mapped.filter(({ x, y }) =>
+    !containingFooting(plan.footings, x, y) &&
+    plan.unlabelledFootings.some((rect) =>
+      x >= rect.x0 && x <= rect.x1 && y >= rect.y0 && y <= rect.y1));
+  return inside.length
+    ? [`${inside.length} certified column marker(s) sit inside footing outlines with no F label.`]
+    : [];
+};
 
 const emptyFootingWarning = (plan: FoundationPlanGeometry, placements: Placement[]) => {
   const placed = new Set(placements.map((placement) => placement.footing.id));
@@ -184,6 +184,27 @@ const unreadWarning = (placements: Placement[]) => {
 };
 
 /**
+ * Certified rows keyed by the certified sheet's own printed grid labels, for plan rows
+ * that carry only grid labels (a 基礎伏図 read by the Gemini fallback). Labels spelled
+ * differently on the two sheets (X2A and X2C) will not match; callers warn about it.
+ */
+export const certifiedLocatorRows = (map: CertifiedPlacementMap): CertifiedCoordinateData[] => {
+  const { x, y } = map.gridLabels;
+  if (x.length === 0 || y.length === 0) return [];
+  const xs = x.map((line) => line.position);
+  const ys = y.map((line) => line.position);
+  return map.markers
+    .filter((marker) => marker.code)
+    .map(({ rect, code }): CertifiedCoordinateData => ({
+      xAxis: axisToken(snapAxis(rect.x0, rect.x1, xs), x),
+      yAxis: axisToken(snapAxis(rect.y0, rect.y1, ys), y),
+      columnType: code,
+      page: map.page,
+      bbox: toBoundingBox(rect, map.pageWidth, map.pageHeight),
+    }));
+};
+
+/**
  * Join a 基礎伏図 and a 認定柱脚資料 placement page by geometry: register both grids
  * by line order and spacing, map every certified marker into plan space, and give
  * it to the plan footing that contains it. Rows for one placement share a
@@ -194,12 +215,13 @@ export const joinFoundationPriorityGeometry = (
   certified: CertifiedPlacementMap,
   keyPrefix: string,
 ): PriorityGeometryJoinResult => {
-  const registration = registerGrids(plan, certified);
+  const registration = alignGrids(plan, certified);
   if (typeof registration === 'string') {
     return { certifiedRows: [], planRows: planLocatorRows(plan), warnings: [registration] };
   }
 
-  const placements = placeMarkers(plan, certified, registration);
+  const mapped = mapMarkers(certified, registration);
+  const placements = mapped.flatMap((entry) => placementOf(plan, entry));
   const keyOf = (placement: Placement) => `${keyPrefix}:${placement.marker.id}`;
   const certifiedRows = placements.map((placement): CertifiedCoordinateData => ({
     xAxis: placement.xAxis,
@@ -228,6 +250,11 @@ export const joinFoundationPriorityGeometry = (
   return {
     certifiedRows,
     planRows,
-    warnings: [...emptyFootingWarning(plan, placements), ...unreadWarning(placements)],
+    warnings: [
+      ...emptyFootingWarning(plan, placements),
+      ...unreadWarning(placements),
+      ...nearEdgeWarning(plan, mapped),
+      ...unlabelledWarning(plan, mapped),
+    ],
   };
 };

@@ -73,8 +73,10 @@ describe('foundation priority diagnostics', () => {
     expect(withFallbackWarning(base, reason).warning).toBe(
       'Read with the Gemini fallback: scan.pdf has no page with X/Y grid labels.',
     );
-    expect(withFallbackWarning(addPriorityWarning(base, 'Coverage is incomplete.'), reason).warning).toBe(
-      'Read with the Gemini fallback: scan.pdf has no page with X/Y grid labels. Coverage is incomplete.',
+    const withOwnWarning = addPriorityWarning(base, 'Coverage is incomplete.');
+    expect(withFallbackWarning(withOwnWarning, reason).warning).toBe(
+      'Read with the Gemini fallback: scan.pdf has no page with X/Y grid labels. ' +
+        'Coverage is incomplete.',
     );
   });
 });

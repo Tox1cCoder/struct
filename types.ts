@@ -105,6 +105,8 @@ export interface FoundationPlanGeometry {
   gridY: PlanGridLine[];
   footings: PlanFooting[];
   unassignedLabels: string[];
+  /** Footing-style outlines no F label claimed, excluding squares nested in a labelled footing. */
+  unlabelledFootings: PageRect[];
 }
 
 export interface CertifiedMarker {
@@ -121,6 +123,8 @@ export interface CertifiedPlacementMap {
   pageWidth: number;
   pageHeight: number;
   gridCandidates: { x: number[]; y: number[] };
+  /** The certified sheet's own grid labels (native or SHX text); names may differ from the plan. */
+  gridLabels: { x: PlanGridLine[]; y: PlanGridLine[] };
   markers: CertifiedMarker[];
 }
 

@@ -91,63 +91,69 @@ const nearestIndex = (sorted: number[], value: number) => {
   return best;
 };
 
-/** Match every plan line under one linear fit, or null when any line has no candidate. */
-const fitAll = (plan: number[], candidates: number[], scale: number, offset: number) => {
-  const span = scale * (plan[plan.length - 1] - plan[0]);
-  const tolerance = Math.max(1.5, span * 0.006);
-  const matched: number[] = [];
-  let error = 0;
-  for (const value of plan) {
-    const predicted = scale * value + offset;
-    const candidate = candidates[nearestIndex(candidates, predicted)];
-    const residual = Math.abs(candidate - predicted);
-    if (residual > tolerance || matched.includes(candidate)) return null;
-    matched.push(candidate);
-    error += residual * residual;
-  }
-  return { matched, error };
-};
-
-export interface AxisRegistration {
+export interface AxisFit {
   /** Certified position of each plan grid line, in plan order. */
   positions: number[];
   /** Certified points per plan point. */
   scale: number;
+  /** Root-mean-square residual in plan points, so fits at different scales compare fairly. */
+  rms: number;
 }
 
-const SCALE_AGREEMENT = 0.03;
+/** Match every plan line under one linear fit, or null when any line has no candidate. */
+const fitAll = (
+  plan: number[],
+  candidates: number[],
+  scale: number,
+  offset: number,
+): AxisFit | null => {
+  const span = scale * (plan[plan.length - 1] - plan[0]);
+  const tolerance = Math.max(1.5, span * 0.006);
+  const positions: number[] = [];
+  let squares = 0;
+  for (const value of plan) {
+    const predicted = scale * value + offset;
+    const candidate = candidates[nearestIndex(candidates, predicted)];
+    const residual = Math.abs(candidate - predicted);
+    if (residual > tolerance || positions.includes(candidate)) return null;
+    positions.push(candidate);
+    squares += (residual / scale) ** 2;
+  }
+  return { positions, scale, rms: Math.sqrt(squares / plan.length) };
+};
+
+const samePositions = (left: number[], right: number[]) =>
+  left.every((value, index) => value === right[index]);
 
 /**
- * Find the certified line position for each plan grid line, in order. The two
- * drawings share one grid at different scale and offset, so a fit is accepted
- * only when every plan line lands on a candidate. Extra candidates (dimension
- * lines, borders) are skipped. Labels are never compared. Pass `expectedScale`
- * (from the other axis) to reject fits drawn at a different scale, which an
- * axis with only two lines cannot rule out on its own.
+ * Every way the plan grid lines can land on certified candidates, best first. The
+ * two drawings share one grid at different scale and offset, so a fit is kept only
+ * when every plan line lands on a candidate; extra candidates (dimension lines,
+ * borders, ruled tables) are skipped. Labels are never compared. Choosing between
+ * fits needs both axes and the markers, so that is left to the caller.
  */
-export const registerGridAxis = (
-  planPositions: number[],
-  candidates: number[],
-  expectedScale?: number,
-): AxisRegistration | null => {
+/** Keep one fit per set of positions: the one with the smaller error. */
+const keepBest = (fits: AxisFit[], fit: AxisFit) => {
+  const known = fits.findIndex((other) => samePositions(other.positions, fit.positions));
+  if (known === -1) fits.push(fit);
+  else if (fit.rms < fits[known].rms) fits[known] = fit;
+};
+
+export const fitGridAxis = (planPositions: number[], candidates: number[]): AxisFit[] => {
   const plan = [...planPositions].sort((left, right) => left - right);
   const sorted = [...candidates].sort((left, right) => left - right);
   const planSpan = plan[plan.length - 1] - plan[0];
-  if (plan.length < 2 || planSpan <= 0 || sorted.length < plan.length) return null;
+  if (plan.length < 2 || planSpan <= 0 || sorted.length < plan.length) return [];
 
-  let best: (AxisRegistration & { error: number }) | null = null;
-  for (let first = 0; first < sorted.length; first += 1) {
-    for (let last = first + 1; last < sorted.length; last += 1) {
-      const scale = (sorted[last] - sorted[first]) / planSpan;
-      const agrees = expectedScale === undefined ||
-        Math.abs(scale / expectedScale - 1) <= SCALE_AGREEMENT;
-      const fit = agrees ? fitAll(plan, sorted, scale, sorted[first] - scale * plan[0]) : null;
-      if (fit && (!best || fit.error < best.error)) {
-        best = { positions: fit.matched, scale, error: fit.error };
-      }
+  const fits: AxisFit[] = [];
+  sorted.forEach((start, first) => {
+    for (const end of sorted.slice(first + 1)) {
+      const scale = (end - start) / planSpan;
+      const fit = fitAll(plan, sorted, scale, start - scale * plan[0]);
+      if (fit) keepBest(fits, fit);
     }
-  }
-  return best && { positions: best.positions, scale: best.scale };
+  });
+  return fits.sort((left, right) => left.rms - right.rms);
 };
 
 /** Piecewise-linear map through matching knots, extrapolated past both ends. */

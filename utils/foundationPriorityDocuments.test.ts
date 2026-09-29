@@ -67,6 +67,25 @@ describe('readCertifiedDocument', () => {
     expect(map?.markers).toHaveLength(5);
   });
 
+  it('prefers a page with grid labels over a table page with more coloured cells', () => {
+    const labelled: PdfPageGeometry = {
+      ...markerPage(3),
+      texts: [
+        { text: 'X1', rect: { x0: 98, y0: 650, x1: 102, y1: 653 } },
+        { text: 'X2', rect: { x0: 398, y0: 650, x1: 402, y1: 653 } },
+        { text: 'Y1', rect: { x0: 60, y0: 598, x1: 64, y1: 601 } },
+        { text: 'Y2', rect: { x0: 60, y0: 98, x1: 64, y1: 101 } },
+      ],
+    };
+    const map = readCertifiedDocument([markerPage(5), labelled]);
+    expect(map?.page).toBe(2);
+    expect(map?.gridLabels.x.map((line) => line.name)).toEqual(['X1', 'X2']);
+    expect(map?.gridLabels.y.map((line) => [line.name, line.position])).toEqual([
+      ['Y2', 99.5],
+      ['Y1', 599.5],
+    ]);
+  });
+
   it('returns null when no page has at least three markers inside a grid', () => {
     expect(readCertifiedDocument([markerPage(2), blank])).toBeNull();
   });

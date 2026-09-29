@@ -6,8 +6,8 @@ describe('buildFoundationPriorityText', () => {
 
     const result = buildFoundationPriorityText(
       [
-        { xAxis: 'X1-X2', yAxis: 'Y8', columnType: 'P1', locationKey: 'c:m1', sourceFileId: 'cert' },
-        { xAxis: 'X1-X2', yAxis: 'Y8', columnType: 'P2', locationKey: 'c:m2', sourceFileId: 'cert' },
+        { xAxis: 'X1-X2', yAxis: 'Y8', columnType: 'P1', locationKey: 'c:m1', sourceFileId: 'c' },
+        { xAxis: 'X1-X2', yAxis: 'Y8', columnType: 'P2', locationKey: 'c:m2', sourceFileId: 'c' },
       ],
       [
         { foundation: 'F4', xAxis: 'X1-X2', yAxis: 'Y8', planColumnType: '', locationKey: 'c:m1' },

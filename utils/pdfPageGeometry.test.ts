@@ -3,6 +3,7 @@ import { extractPdfPageGeometry, type PdfPageLike } from './pdfPageGeometry';
 
 const OPS = {
   setLineWidth: 2,
+  setGState: 9,
   save: 10,
   restore: 11,
   transform: 12,
@@ -87,6 +88,18 @@ describe('extractPdfPageGeometry', () => {
     expect(geometry.rects[0].lineWidth).toBeCloseTo(0.48);
     expect(geometry.rects[0].stroked).toBe(true);
     expect(geometry.segments).toHaveLength(4);
+  });
+
+  it('takes the line width from an ExtGState LW entry', async () => {
+    const page = fakePage([
+      [OPS.setGState, [[['ca', 1], ['LW', 0.48]]]],
+      path([OPS.rectangle], [100, 700, 20, 10]),
+      [OPS.stroke, null],
+    ]);
+
+    const geometry = await extractPdfPageGeometry(page, OPS);
+
+    expect(geometry.rects[0].lineWidth).toBeCloseTo(0.48);
   });
 
   it('restores the transform after restore and form XObjects', async () => {

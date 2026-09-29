@@ -278,11 +278,16 @@ describe('Certified marker label reads', () => {
     const { contents, model, config } = generateContent.mock.calls[0][0];
     expect(model).toBe('gemini-3.1-pro-preview');
     expect(config.thinkingConfig).toEqual({ thinkingLevel: 'LOW' });
-    expect(contents.filter((part: unknown) => typeof part === 'string' && part.startsWith('Marker ')))
-      .toEqual(['Marker m4:', 'Marker m9:']);
+    const labels = contents.filter((part: unknown) =>
+      typeof part === 'string' && part.startsWith('Marker '));
+    expect(labels).toEqual(['Marker m4:', 'Marker m9:']);
+    const image = (data: string) => ({
+      inlineData: { mimeType: 'image/png', data },
+      mediaResolution: { level: 'MEDIA_RESOLUTION_HIGH' },
+    });
     expect(contents.filter((part: { inlineData?: unknown }) => part.inlineData)).toEqual([
-      { inlineData: { mimeType: 'image/png', data: 'png-m4' }, mediaResolution: { level: 'MEDIA_RESOLUTION_HIGH' } },
-      { inlineData: { mimeType: 'image/png', data: 'png-m9' }, mediaResolution: { level: 'MEDIA_RESOLUTION_HIGH' } },
+      image('png-m4'),
+      image('png-m9'),
     ]);
   });
 
@@ -303,5 +308,15 @@ describe('Certified marker label reads', () => {
       .filter((part: { inlineData?: { data: string } }) => part.inlineData)
       .map((part: { inlineData: { data: string } }) => part.inlineData.data);
     expect(retryImages).toEqual(['png-m2', 'png-m3']);
+  });
+
+  it('keeps first-pass reads when the retry request fails', async () => {
+    generateContent
+      .mockResolvedValueOnce(reply([{ id: 'm1', code: 'C1' }]))
+      .mockRejectedValueOnce(new Error('429 Too Many Requests'));
+
+    const codes = await readCertifiedMarkerCodes([crop('m1'), crop('m2')]);
+
+    expect(codes).toEqual(new Map([['m1', 'C1']]));
   });
 });

@@ -23,6 +23,7 @@ vi.mock('../services/geminiService', () => ({
 vi.mock('../services/foundationPriorityGeometry', () => ({
   extractCertifiedPlacementMap: vi.fn(),
   extractFoundationPlanGeometry: vi.fn(),
+  PriorityGeometryUnavailableError: class extends Error {},
 }));
 
 const geometryDiagnostics = (role: 'certified' | 'plan'): PriorityPipelineDiagnostics => ({
@@ -30,7 +31,9 @@ const geometryDiagnostics = (role: 'certified' | 'plan'): PriorityPipelineDiagno
   role,
   model: 'vector-geometry',
   anchorMode: 'native',
-  anchorCounts: { foundation: 0, 'plan-column': 0, 'certified-column': 0, 'x-axis': 0, 'y-axis': 0 },
+  anchorCounts: {
+    foundation: 0, 'plan-column': 0, 'certified-column': 0, 'x-axis': 0, 'y-axis': 0,
+  },
   cropCount: 0,
   stages: { totalMs: 50 },
   passUsed: 'primary',
@@ -92,6 +95,7 @@ describe('App foundation priority tab', () => {
         gridY: [{ name: 'Y2', position: 100 }, { name: 'Y1', position: 200 }],
         footings: [{ id: 'f0', label: 'F1', rect: { x0: 90, y0: 90, x1: 110, y1: 110 } }],
         unassignedLabels: [],
+        unlabelledFootings: [],
       },
       diagnostics: geometryDiagnostics('plan'),
     });
@@ -101,7 +105,10 @@ describe('App foundation priority tab', () => {
         pageWidth: 1191,
         pageHeight: 842,
         gridCandidates: { x: [210, 410], y: [110, 310] },
-        markers: [{ id: 'm0', code: 'C3', fill: [0, 255, 0], rect: { x0: 201, y0: 103, x1: 221, y1: 119 } }],
+        gridLabels: { x: [], y: [] },
+        markers: [
+          { id: 'm0', code: 'C3', fill: [0, 255, 0], rect: { x0: 201, y0: 103, x1: 221, y1: 119 } },
+        ],
       },
       diagnostics: geometryDiagnostics('certified'),
     });
