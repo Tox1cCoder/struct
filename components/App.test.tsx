@@ -12,6 +12,10 @@ import {
   extractFoundationPlanGeometry,
 } from '../services/foundationPriorityGeometry';
 import type { PriorityPipelineDiagnostics } from '../types';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+const TEMPLATE_PATH = resolve(__dirname, '../samples/V2.5 TnfDesignInformation_v08_Template.xlsm');
 
 vi.mock('../services/geminiService', () => ({
   extractCertifiedCoordinateData: vi.fn(),
@@ -232,5 +236,48 @@ describe('App foundation priority tab', () => {
     expect(await screen.findByLabelText('FG1 FG_巾止筋_距離_最大')).toBeInTheDocument();
     expect(screen.queryByLabelText('FW1 FG_上端筋_直径')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('FG1 FW_ヨコ筋_本数')).not.toBeInTheDocument();
+  });
+
+  it('keeps pasted foundation mappings when switching tabs and back', () => {
+    render(<App />);
+    const mappings = screen.getByPlaceholderText(/Paste mappings/);
+    fireEvent.change(mappings, { target: { value: 'F1 : C1 : -' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Frame (FW/FG)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Column Reinforcement' }));
+
+    expect(screen.getByPlaceholderText(/Paste mappings/)).toHaveValue('F1 : C1 : -');
+  });
+
+  it('empties the foundation mappings box when the column tab is cleared', () => {
+    render(<App />);
+    fireEvent.change(screen.getByPlaceholderText(/Paste mappings/), { target: { value: 'F1 : C1 : -' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear All' }));
+
+    expect(screen.getByPlaceholderText(/Paste mappings/)).toHaveValue('');
+    expect(screen.queryByText(/unique mappings/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the uploaded report template when switching tabs and back', async () => {
+    vi.mocked(extractDataFromPdf).mockResolvedValue([
+      { columnType: 'C1', columnDimensions: '500x500', mainReinforcement: '12-D22', hoopReinforcement: 'D10@100' },
+    ]);
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Upload Reinforcement Docs'), {
+      target: { files: [new File(['pdf'], 'col.pdf', { type: 'application/pdf' })] },
+    });
+    expect(await screen.findByText('1 ok')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+    fireEvent.change(await screen.findByLabelText('Upload template file'), {
+      target: { files: [new File([readFileSync(TEMPLATE_PATH)], 'Template.xlsm')] },
+    });
+    expect(await screen.findByText('Template.xlsm', {}, { timeout: 5000 })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Column Reinforcement' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+
+    expect(screen.getByText('Template.xlsm')).toBeVisible();
   });
 });

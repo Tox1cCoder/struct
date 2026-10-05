@@ -1,47 +1,34 @@
-import React, { useState, useCallback } from 'react';
-import { FoundationColumnData } from '../types';
-import { parseFoundationColumnText } from '../utils/parseFoundationText';
+import React from 'react';
 
 interface FoundationTextInputProps {
-  onDataChange: (data: FoundationColumnData[]) => void;
+  value: string;
+  onChange: (text: string) => void;
+  /** Mappings parsed from `value`; the parent owns parsing so the text survives tab switches. */
+  mappingCount: number;
   disabled?: boolean;
 }
 
-export const FoundationTextInput: React.FC<FoundationTextInputProps> = ({ onDataChange, disabled }) => {
-  const [text, setText] = useState('');
-  const [parsedCount, setParsedCount] = useState(0);
-
-  const handleTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    setText(value);
-    
-    // Parse and notify parent
-    const parsed = parseFoundationColumnText(value);
-    setParsedCount(parsed.length);
-    onDataChange(parsed);
-  }, [onDataChange]);
-
-  const handleClear = () => {
-    setText('');
-    setParsedCount(0);
-    onDataChange([]);
-  };
-
+export const FoundationTextInput: React.FC<FoundationTextInputProps> = ({
+  value,
+  onChange,
+  mappingCount,
+  disabled,
+}) => {
   return (
     <div className="w-full">
       <div className="flex items-center justify-between mb-2">
         <label className="text-sm font-medium text-gray-700">
           Paste Foundation-Column mappings
         </label>
-        {parsedCount > 0 && (
+        {mappingCount > 0 && (
           <span className="text-xs font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-            {parsedCount} unique mappings
+            {mappingCount} unique mappings
           </span>
         )}
       </div>
       <textarea
-        value={text}
-        onChange={handleTextChange}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         placeholder={`Paste mappings in "F : C : FC : BxH" format, one per line...
 
@@ -66,9 +53,9 @@ F11 : C1`}
         <p className="text-xs text-gray-500">
           Only Fxxx patterns kept. Duplicates and (SGL-...) notes removed automatically.
         </p>
-        {text && (
+        {value && (
           <button
-            onClick={handleClear}
+            onClick={() => onChange('')}
             disabled={disabled}
             className="text-xs text-red-600 hover:text-red-800 font-medium disabled:opacity-50"
           >

@@ -121,22 +121,40 @@ export const ReportTab: React.FC<Props> = ({ data, frameData = [], priorityData 
 
   // ---- Upload mode handlers ----
 
-  const ACCEPTED_EXTS = /\.(xlsx|xlsm|xlsb|xls|ods)$/i;
+  // fillTypeSheet patches the sheet XML inside the zip container, so only the
+  // OOXML formats can be exported even though SheetJS could read more.
+  const ACCEPTED_EXTS = /\.(xlsx|xlsm)$/i;
+  const UNREADABLE_WORKBOOK = 'Could not read that workbook. Only .xlsx/.xlsm templates are supported.';
+
+  const clearTemplate = () => {
+    setWb(null);
+    setFileBytes(null);
+    setFileName('');
+    setDisabledSheets({});
+    setExportError(null);
+  };
 
   const loadFile = (file: File) => {
-    if (!ACCEPTED_EXTS.test(file.name)) return;
+    if (!ACCEPTED_EXTS.test(file.name)) {
+      setExportError(`"${file.name}" is not supported. Use an .xlsx or .xlsm template.`);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const bytes = new Uint8Array(e.target!.result as ArrayBuffer);
-        setWb(XLSX.read(bytes, { type: 'array', cellStyles: true, bookVBA: true }));
+        // SheetJS parses arbitrary text as CSV, so check for the zip signature first.
+        if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) throw new Error('not a zip container');
+        const workbook = XLSX.read(bytes, { type: 'array', cellStyles: true, bookVBA: true });
+        clearTemplate();
+        setWb(workbook);
         setFileBytes(bytes);
         setFileName(file.name);
-        setExportError(null);
       } catch {
-        setExportError('Could not read that workbook. Only .xlsx/.xlsm templates are supported.');
+        setExportError(UNREADABLE_WORKBOOK);
       }
     };
+    reader.onerror = () => setExportError(UNREADABLE_WORKBOOK);
     reader.readAsArrayBuffer(file);
   };
 
@@ -185,6 +203,12 @@ export const ReportTab: React.FC<Props> = ({ data, frameData = [], priorityData 
     } finally {
       setExporting(false);
     }
+  };
+
+  // Both modes share one error slot, so an error from one must not follow the user into the other.
+  const switchMode = (next: ReportMode) => {
+    setMode(next);
+    setExportError(null);
   };
 
   // ---- Build mode ----
@@ -240,10 +264,10 @@ export const ReportTab: React.FC<Props> = ({ data, frameData = [], priorityData 
     <div className="space-y-5">
       {/* Mode toggle */}
       <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 gap-1">
-        <ModeButton active={mode === 'upload'} onClick={() => setMode('upload')}>
+        <ModeButton active={mode === 'upload'} onClick={() => switchMode('upload')}>
           Upload Template
         </ModeButton>
-        <ModeButton active={mode === 'build'} onClick={() => setMode('build')}>
+        <ModeButton active={mode === 'build'} onClick={() => switchMode('build')}>
           Build Template
         </ModeButton>
       </div>
@@ -251,6 +275,12 @@ export const ReportTab: React.FC<Props> = ({ data, frameData = [], priorityData 
       {/* ---- UPLOAD MODE ---- */}
       {mode === 'upload' && (
         <div className="space-y-5">
+          {exportError && (
+            <p role="alert" className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+              {exportError}
+            </p>
+          )}
+
           {/* Upload zone */}
           {!wb ? (
             <div
@@ -295,13 +325,13 @@ export const ReportTab: React.FC<Props> = ({ data, frameData = [], priorityData 
                 >
                   Browse file
                 </button>
-                <p className="text-xs text-gray-400">.xlsx · .xlsm · .xlsb · .xls · .ods</p>
+                <p className="text-xs text-gray-400">.xlsx · .xlsm</p>
               </div>
               <input
                 ref={fileInputRef}
                 type="file"
                 aria-label="Upload template file"
-                accept=".xlsx,.xlsm,.xlsb,.xls,.ods"
+                accept=".xlsx,.xlsm"
                 onChange={handleFileInput}
                 className="hidden"
               />
@@ -350,7 +380,7 @@ export const ReportTab: React.FC<Props> = ({ data, frameData = [], priorityData 
                     </select>
                   </label>
                   <button
-                    onClick={() => { setWb(null); setFileBytes(null); setFileName(''); }}
+                    onClick={clearTemplate}
                     className="text-xs text-gray-500 hover:text-red-600 transition-colors"
                   >
                     Remove
@@ -365,7 +395,7 @@ export const ReportTab: React.FC<Props> = ({ data, frameData = [], priorityData 
                     ref={fileInputRef}
                     type="file"
                     aria-label="Replace template file"
-                    accept=".xlsx,.xlsm,.xlsb,.xls,.ods"
+                    accept=".xlsx,.xlsm"
                     onChange={handleFileInput}
                     className="hidden"
                   />
@@ -408,12 +438,6 @@ export const ReportTab: React.FC<Props> = ({ data, frameData = [], priorityData 
                       )}
                     </button>
                   </div>
-
-                  {exportError && (
-                    <p role="alert" className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-                      {exportError}
-                    </p>
-                  )}
 
                   {sheetPlans.map((plan) => (
                     <SheetPlanCard
@@ -471,7 +495,7 @@ export const ReportTab: React.FC<Props> = ({ data, frameData = [], priorityData 
                 </button>
               )}
             </div>
-            {exportError && mode === 'build' && (
+            {exportError && (
               <p role="alert" className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
                 {exportError}
               </p>

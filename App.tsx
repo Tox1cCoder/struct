@@ -31,7 +31,6 @@ import {
   EditableFrameData,
   EditableRowsState,
   ExpandedReinforcementData,
-  FoundationColumnData,
   FileResult,
   FoundationPlanCoordinateFileResult,
   FoundationPriorityEvidenceLocation,
@@ -41,6 +40,7 @@ import {
 } from './types';
 import { getErrorMessage, logError } from './utils/errorHandling';
 import { buildFoundationPriorityText } from './utils/mergeFoundationPriority';
+import { parseFoundationColumnText } from './utils/parseFoundationText';
 import { collectPriorityInputs } from './utils/foundationPriorityInputs';
 import { withFallbackWarning } from './utils/foundationPriorityDiagnostics';
 import { hasActiveJobs } from './utils/fileJobs';
@@ -70,10 +70,14 @@ const TAB_ACCENT: Record<TabType, ViewerAccent> = {
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('column');
+  // Tab panels stay mounted so their local state (e.g. an uploaded report template)
+  // survives tab switches; the report chunk is lazy, so it mounts on first visit only.
+  const [reportVisited, setReportVisited] = useState(false);
 
   const [reinfResults, setReinfResults] = useState<FileResult[]>([]);
 
-  const [foundationData, setFoundationData] = useState<FoundationColumnData[]>([]);
+  const [foundationText, setFoundationText] = useState('');
+  const foundationData = useMemo(() => parseFoundationColumnText(foundationText), [foundationText]);
 
   const [frameResults, setFrameResults] = useState<FrameFileResult[]>([]);
 
@@ -342,10 +346,6 @@ const App: React.FC = () => {
     [registerSourceUrl],
   );
 
-  const handleFoundationDataChange = useCallback((data: FoundationColumnData[]) => {
-    setFoundationData(data);
-  }, []);
-
   const processFrameImage = async (id: string, base64: string, mimeType: string) => {
     setFrameResults((prev) => prev.map((r) => (r.id === id ? { ...r, status: 'PROCESSING' } : r)));
     try {
@@ -492,7 +492,7 @@ const App: React.FC = () => {
   const handleClearColumn = () => {
     revokeSourceUrls(reinfResults.map((r) => r.sourceUrl));
     setReinfResults([]);
-    setFoundationData([]);
+    setFoundationText('');
     setColumnRows({ rows: [], deletedSourceKeys: [] });
     setViewerSelection(null);
     setSelectedRowKey(null);
@@ -512,6 +512,7 @@ const App: React.FC = () => {
 
   const handleTabChange = (tab: TabType) => {
     setActiveTab(tab);
+    if (tab === 'report') setReportVisited(true);
     setViewerSelection(null);
     setSelectedRowKey(null);
   };
@@ -716,226 +717,224 @@ const App: React.FC = () => {
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
-          {activeTab === 'column' && (
-            <>
-              {!hasAnyResults && foundationData.length === 0 && (
-                <div className="text-center mb-8">
-                  <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl">Structural Column Extractor</h2>
-                  <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
-                    Extract reinforcement details and link with foundation-column relationships.
-                  </p>
-                </div>
-              )}
-
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                    <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-                      Column Reinforcement (主筋・帯筋)
-                    </h3>
-                    <FileUpload
-                      onFilesSelect={handleReinfFilesSelect}
-                      title="Upload Reinforcement Docs"
-                      description="Click to browse or drag & drop files here"
-                      iconColor="indigo"
-                      zoneId="reinforcement"
-                      isActiveTab={activeTab === 'column'}
-                    />
-                    <StatusStrip results={reinfResults} accent="indigo" />
-                  </div>
-
-                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                    <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                      Foundation-Column Linking (基礎-柱)
-                    </h3>
-                    <FoundationTextInput
-                      onDataChange={handleFoundationDataChange}
-                      disabled={isReinfProcessing}
-                    />
-                  </div>
-                </div>
-
-                {columnRows.rows.length > 0 && (
-                  <div className="space-y-6 animate-fade-in-up">
-                    <ResultsTable
-                      data={columnRows.rows}
-                      hasFoundationData={foundationData.length > 0}
-                      selectedRowKey={selectedRowKey}
-                      onRowSelect={handleRowSelect}
-                      onRowChange={handleColumnRowChange}
-                      onAddRow={handleColumnAddRow}
-                      onDeleteRow={handleColumnDeleteRow}
-                    />
-                    <InfoBanner accent="indigo">
-                      <strong>Note:</strong> Data extracted based on "Zone I" (Ⅰゾーン) priority.
-                      {foundationData.length > 0 && ' Foundation-Column relationships have been linked.'}{' '}
-                      Always verify AI-extracted engineering data against original documents.
-                    </InfoBanner>
-                  </div>
-                )}
+          <div hidden={activeTab !== 'column'}>
+            {!hasAnyResults && foundationData.length === 0 && (
+              <div className="text-center mb-8">
+                <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl">Structural Column Extractor</h2>
+                <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
+                  Extract reinforcement details and link with foundation-column relationships.
+                </p>
               </div>
-            </>
-          )}
+            )}
 
-          {activeTab === 'frame' && (
-            <>
-              {!hasFrameResults && (
-                <div className="text-center mb-8">
-                  <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl">Frame Data Extractor</h2>
-                  <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
-                    Extract FW (Foundation Wall) and FG (Foundation Girder) data from images.
-                  </p>
-                </div>
-              )}
-
-              <div className="space-y-6">
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
                   <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                    Frame Images (FW・FG)
+                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                    Column Reinforcement (主筋・帯筋)
                   </h3>
-                  <FrameImageInput
-                    results={frameResults}
-                    onImagePaste={handleFrameImagePaste}
-                    onClear={handleFrameClear}
-                    isActiveTab={activeTab === 'frame'}
+                  <FileUpload
+                    onFilesSelect={handleReinfFilesSelect}
+                    title="Upload Reinforcement Docs"
+                    description="Click to browse or drag & drop files here"
+                    iconColor="indigo"
+                    zoneId="reinforcement"
+                    isActiveTab={activeTab === 'column'}
+                  />
+                  <StatusStrip results={reinfResults} accent="indigo" />
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    Foundation-Column Linking (基礎-柱)
+                  </h3>
+                  <FoundationTextInput
+                    value={foundationText}
+                    onChange={setFoundationText}
+                    mappingCount={foundationData.length}
+                    disabled={isReinfProcessing}
+                  />
+                </div>
+              </div>
+
+              {columnRows.rows.length > 0 && (
+                <div className="space-y-6 animate-fade-in-up">
+                  <ResultsTable
+                    data={columnRows.rows}
+                    hasFoundationData={foundationData.length > 0}
+                    selectedRowKey={selectedRowKey}
+                    onRowSelect={handleRowSelect}
+                    onRowChange={handleColumnRowChange}
+                    onAddRow={handleColumnAddRow}
+                    onDeleteRow={handleColumnDeleteRow}
+                  />
+                  <InfoBanner accent="indigo">
+                    <strong>Note:</strong> Data extracted based on "Zone I" (Ⅰゾーン) priority.
+                    {foundationData.length > 0 && ' Foundation-Column relationships have been linked.'}{' '}
+                    Always verify AI-extracted engineering data against original documents.
+                  </InfoBanner>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div hidden={activeTab !== 'frame'}>
+            {!hasFrameResults && (
+              <div className="text-center mb-8">
+                <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl">Frame Data Extractor</h2>
+                <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
+                  Extract FW (Foundation Wall) and FG (Foundation Girder) data from images.
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-6">
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                  Frame Images (FW・FG)
+                </h3>
+                <FrameImageInput
+                  results={frameResults}
+                  onImagePaste={handleFrameImagePaste}
+                  onClear={handleFrameClear}
+                  isActiveTab={activeTab === 'frame'}
+                />
+              </div>
+
+              {frameRows.rows.length > 0 && (
+                <div className="space-y-6 animate-fade-in-up">
+                  {(['FW', 'FG'] as const).map((frameType) => {
+                    const rows = frameRowsByType[frameType];
+                    return rows.length > 0 ? (
+                      <FrameResultsTable
+                        key={frameType}
+                        data={rows}
+                        selectedRowKey={selectedRowKey}
+                        onRowSelect={handleRowSelect}
+                        onRowChange={handleFrameRowChange}
+                        onAddRow={() => handleFrameAddRow(frameType)}
+                        onDeleteRow={handleFrameDeleteRow}
+                      />
+                    ) : null;
+                  })}
+                  <InfoBanner accent="amber">
+                    <strong>Note:</strong> Frame data extracted from images. FW = Foundation Wall (布基礎), FG =
+                    Foundation Girder (地中梁/フーチング). Always verify AI-extracted engineering data against
+                    original documents.
+                  </InfoBanner>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div hidden={activeTab !== 'priority'}>
+            {!hasPrioritySourceResults && (
+              <div className="text-center mb-8">
+                <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl">Foundation Priority Extractor</h2>
+                <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
+                  Join 認定柱脚資料 and 基礎伏図 by canonical grid placement tokens, then output plain-text
+                  foundation mappings.
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                    認定柱脚資料
+                  </h3>
+                  <FileUpload
+                    onFilesSelect={handleCertifiedFilesSelect}
+                    title="Upload Certified Column Base PDFs"
+                    description="Click to browse or drag & drop PDF files here"
+                    iconColor="indigo"
+                    zoneId="certified-foundation"
+                    isActiveTab={activeTab === 'priority'}
+                    accept=".pdf,application/pdf"
+                    allowPaste={false}
+                    fileTypesLabel="PDF only"
+                  />
+                  <StatusStrip
+                    results={certifiedResults.map((r) => ({
+                      ...r,
+                      durationMs: r.diagnostics?.stages.totalMs,
+                      passUsed: r.diagnostics?.passUsed,
+                      warning: r.diagnostics?.warning,
+                      missingLabels: r.diagnostics?.coverage?.missingLabels,
+                    }))}
+                    accent="indigo"
                   />
                 </div>
 
-                {frameRows.rows.length > 0 && (
-                  <div className="space-y-6 animate-fade-in-up">
-                    {(['FW', 'FG'] as const).map((frameType) => {
-                      const rows = frameRowsByType[frameType];
-                      return rows.length > 0 ? (
-                        <FrameResultsTable
-                          key={frameType}
-                          data={rows}
-                          selectedRowKey={selectedRowKey}
-                          onRowSelect={handleRowSelect}
-                          onRowChange={handleFrameRowChange}
-                          onAddRow={() => handleFrameAddRow(frameType)}
-                          onDeleteRow={handleFrameDeleteRow}
-                        />
-                      ) : null;
-                    })}
-                    <InfoBanner accent="amber">
-                      <strong>Note:</strong> Frame data extracted from images. FW = Foundation Wall (布基礎), FG =
-                      Foundation Girder (地中梁/フーチング). Always verify AI-extracted engineering data against
-                      original documents.
-                    </InfoBanner>
-                  </div>
-                )}
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    基礎伏図
+                  </h3>
+                  <FileUpload
+                    onFilesSelect={handleFoundationPlanFilesSelect}
+                    title="Upload Foundation Plan PDFs"
+                    description="Click to browse or drag & drop PDF files here"
+                    iconColor="emerald"
+                    zoneId="foundation-plan-priority"
+                    isActiveTab={activeTab === 'priority'}
+                    accept=".pdf,application/pdf"
+                    allowPaste={false}
+                    fileTypesLabel="PDF only"
+                  />
+                  <StatusStrip
+                    results={foundationPlanResults.map((r) => ({
+                      ...r,
+                      durationMs: r.diagnostics?.stages.totalMs,
+                      passUsed: r.diagnostics?.passUsed,
+                      warning: [r.diagnostics?.warning, priorityInputs.planWarnings[r.id]]
+                        .filter(Boolean)
+                        .join(' ') || undefined,
+                      missingLabels: r.diagnostics?.coverage?.missingLabels,
+                    }))}
+                    accent="emerald"
+                  />
+                </div>
               </div>
-            </>
-          )}
 
-          {activeTab === 'priority' && (
-            <>
-              {!hasPrioritySourceResults && (
-                <div className="text-center mb-8">
-                  <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl">Foundation Priority Extractor</h2>
-                  <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
-                    Join 認定柱脚資料 and 基礎伏図 by canonical grid placement tokens, then output plain-text
-                    foundation mappings.
-                  </p>
+              {shouldShowPriorityResult && (
+                <div className="space-y-6 animate-fade-in-up">
+                  <FoundationPriorityTextResult
+                    text={priorityText}
+                    rows={priorityRows.rows}
+                    selectedRowKey={selectedRowKey}
+                    onRowChange={handlePriorityRowChange}
+                    onAddRow={handlePriorityAddRow}
+                    onDeleteRow={handlePriorityDeleteRow}
+                    onEvidenceSelect={handlePriorityEvidenceSelect}
+                  />
+                  <InfoBanner accent="cyan">
+                    <strong>Rule:</strong> The app lines up the grids of both PDFs by line order
+                    and spacing, then lists every 認定柱脚資料 column or post marker that falls inside
+                    each 基礎伏図 footing outline. If the footing carries an FC code in 基礎伏図, the FC
+                    code wins. Grid label spelling (for example <code>X2A</code> versus
+                    <code>X2C</code>) is never compared.
+                  </InfoBanner>
                 </div>
               )}
+            </div>
+          </div>
 
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                    <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-                      認定柱脚資料
-                    </h3>
-                    <FileUpload
-                      onFilesSelect={handleCertifiedFilesSelect}
-                      title="Upload Certified Column Base PDFs"
-                      description="Click to browse or drag & drop PDF files here"
-                      iconColor="indigo"
-                      zoneId="certified-foundation"
-                      isActiveTab={activeTab === 'priority'}
-                      accept=".pdf,application/pdf"
-                      allowPaste={false}
-                      fileTypesLabel="PDF only"
-                    />
-                    <StatusStrip
-                      results={certifiedResults.map((r) => ({
-                        ...r,
-                        durationMs: r.diagnostics?.stages.totalMs,
-                        passUsed: r.diagnostics?.passUsed,
-                        warning: r.diagnostics?.warning,
-                        missingLabels: r.diagnostics?.coverage?.missingLabels,
-                      }))}
-                      accent="indigo"
-                    />
-                  </div>
-
-                  <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                    <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                      基礎伏図
-                    </h3>
-                    <FileUpload
-                      onFilesSelect={handleFoundationPlanFilesSelect}
-                      title="Upload Foundation Plan PDFs"
-                      description="Click to browse or drag & drop PDF files here"
-                      iconColor="emerald"
-                      zoneId="foundation-plan-priority"
-                      isActiveTab={activeTab === 'priority'}
-                      accept=".pdf,application/pdf"
-                      allowPaste={false}
-                      fileTypesLabel="PDF only"
-                    />
-                    <StatusStrip
-                      results={foundationPlanResults.map((r) => ({
-                        ...r,
-                        durationMs: r.diagnostics?.stages.totalMs,
-                        passUsed: r.diagnostics?.passUsed,
-                        warning: [r.diagnostics?.warning, priorityInputs.planWarnings[r.id]]
-                          .filter(Boolean)
-                          .join(' ') || undefined,
-                        missingLabels: r.diagnostics?.coverage?.missingLabels,
-                      }))}
-                      accent="emerald"
-                    />
-                  </div>
-                </div>
-
-                {shouldShowPriorityResult && (
-                  <div className="space-y-6 animate-fade-in-up">
-                    <FoundationPriorityTextResult
-                      text={priorityText}
-                      rows={priorityRows.rows}
-                      selectedRowKey={selectedRowKey}
-                      onRowChange={handlePriorityRowChange}
-                      onAddRow={handlePriorityAddRow}
-                      onDeleteRow={handlePriorityDeleteRow}
-                      onEvidenceSelect={handlePriorityEvidenceSelect}
-                    />
-                    <InfoBanner accent="cyan">
-                      <strong>Rule:</strong> The app lines up the grids of both PDFs by line order
-                      and spacing, then lists every 認定柱脚資料 column or post marker that falls inside
-                      each 基礎伏図 footing outline. If the footing carries an FC code in 基礎伏図, the FC
-                      code wins. Grid label spelling (for example <code>X2A</code> versus
-                      <code>X2C</code>) is never compared.
-                    </InfoBanner>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {activeTab === 'report' && (
-            <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading report…</div>}>
-              <ReportTab
-                data={columnRows.rows}
-                frameData={frameRows.rows}
-                priorityData={priorityRows.rows}
-              />
-            </Suspense>
+          {reportVisited && (
+            <div hidden={activeTab !== 'report'}>
+              <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading report…</div>}>
+                <ReportTab
+                  data={columnRows.rows}
+                  frameData={frameRows.rows}
+                  priorityData={priorityRows.rows}
+                />
+              </Suspense>
+            </div>
           )}
         </main>
 

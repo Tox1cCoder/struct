@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -156,5 +156,36 @@ describe('ReportTab upload flow', () => {
     expect(frameToggle).toBeDisabled();
     expect(screen.getAllByText(/no data yet/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/1 of 3 detected sheets will be filled/i)).toBeInTheDocument();
+  });
+
+  it('explains why an unreadable workbook was not loaded', async () => {
+    renderAll();
+    fireEvent.change(screen.getByLabelText('Upload template file'), {
+      target: { files: [new File(['not a workbook'], 'Broken.xlsx')] },
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not read that workbook/i);
+  });
+
+  it('rejects formats the filler cannot export instead of ignoring them', () => {
+    renderAll();
+    fireEvent.change(screen.getByLabelText('Upload template file'), {
+      target: { files: [new File(['legacy'], 'Old.xls')] },
+    });
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/\.xlsx or \.xlsm/i);
+  });
+
+  it('clears the previous error once a template loads', async () => {
+    renderAll();
+    const input = screen.getByLabelText('Upload template file');
+    fireEvent.change(input, { target: { files: [new File(['legacy'], 'Old.xls')] } });
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    fireEvent.change(input, {
+      target: { files: [new File([readFileSync(TEMPLATE_PATH)], 'Template.xlsm')] },
+    });
+
+    await screen.findByText('Template.xlsm', {}, { timeout: 5000 });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
